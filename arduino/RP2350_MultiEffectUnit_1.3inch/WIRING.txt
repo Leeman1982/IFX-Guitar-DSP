@@ -1,0 +1,233 @@
+================================================================================
+  RP2350 MULTI-EFFECT GUITAR UNIT - WIRING DIAGRAM
+  1.3" OLED Module Version with Integrated Rotary Encoder
+================================================================================
+
+COMPONENTS:
+- Raspberry Pi Pico 2 (RP2350)
+- 1.3" OLED Module with EC11 Rotary Encoder (SH1106, 128x64)
+- PCM1808 24-bit Stereo ADC
+- PCM5102 24-bit Stereo DAC
+- 5V Power Supply
+
+================================================================================
+1. 1.3" OLED MODULE CONNECTIONS (SH1106 with Integrated Encoder)
+================================================================================
+
+   1.3" OLED Module          Raspberry Pi Pico 2 (RP2350)
+   ────────────────          ────────────────────────────
+
+   GND              ────────► GND (Pin 38 or any GND)
+   VCC              ────────► 3V3(OUT) (Pin 36)
+   SCL              ────────► GPIO 5 (Pin 7) - I2C Clock
+   SDA              ────────► GPIO 4 (Pin 6) - I2C Data
+   TRA (Enc A)      ────────► GPIO 6 (Pin 9) - Rotary Encoder A
+   TRB (Enc B)      ────────► GPIO 7 (Pin 10) - Rotary Encoder B
+   TRS (Enc SW)     ────────► GPIO 8 (Pin 11) - Rotary Encoder Switch
+   BACK Button      ────────► GPIO 9 (Pin 12) - Back Button
+   CONFIRM Button   ────────► GPIO 10 (Pin 14) - Confirm Button
+
+   Note: Module pinout may vary by manufacturer. Common alternatives:
+   - CLK/DT instead of TRA/TRB
+   - KEY/SW instead of TRS
+   - Some modules combine all pins in a single 9-pin header
+
+================================================================================
+2. PCM1808 ADC CONNECTIONS (Audio Input)
+================================================================================
+
+   PCM1808 ADC               Raspberry Pi Pico 2 (RP2350)
+   ───────────               ────────────────────────────
+
+   VDD              ────────► 3V3(OUT) (Pin 36)
+   GND              ────────► GND (Pin 38)
+   DOUT             ────────► GPIO 26 (Pin 31) - I2S Data In
+   LRCK             ────────► GPIO 21 (Pin 27) - I2S Left/Right Clock
+   BCK              ────────► GPIO 20 (Pin 26) - I2S Bit Clock
+   SCKI             ────────► Not Connected (Internal clock)
+   FMT              ────────► GND (I2S mode, left justified)
+   MD0              ────────► 3V3 (Slave mode)
+   MD1              ────────► 3V3 (Slave mode)
+
+   Audio Input:
+   LINL, RINL       ────────► Guitar/Line Input (Left/Right)
+
+================================================================================
+3. PCM5102 DAC CONNECTIONS (Audio Output)
+================================================================================
+
+   PCM5102 DAC               Raspberry Pi Pico 2 (RP2350)
+   ───────────               ────────────────────────────
+
+   VCC              ────────► 3V3(OUT) (Pin 36)
+   GND              ────────► GND (Pin 38)
+   DIN              ────────► GPIO 22 (Pin 29) - I2S Data Out
+   BCK              ────────► GPIO 20 (Pin 26) - I2S Bit Clock (shared)
+   LRCK (or WS)     ────────► GPIO 21 (Pin 27) - I2S LR Clock (shared)
+   SCK              ────────► GND (Auto clock mode)
+   FMT              ────────► 3V3 (I2S format)
+   DEMP             ────────► GND (De-emphasis off)
+   XSMT             ────────► 3V3 (Soft mute disabled)
+   FLT              ────────► GND (Normal filter)
+
+   Audio Output:
+   OUTL, OUTR       ────────► Amplifier/Headphones (Left/Right)
+
+================================================================================
+4. POWER CONNECTIONS
+================================================================================
+
+   RP2350 Power Options:
+   1. USB: Connect USB-C cable to Pico 2 (provides 5V)
+   2. VSYS: Apply 5V to VSYS pin (Pin 39)
+   3. VBUS: Apply 5V to VBUS pin (Pin 40)
+
+   Current Requirements:
+   - RP2350: ~100mA @ 5V
+   - OLED Module: ~50mA @ 3.3V
+   - PCM1808: ~10mA @ 3.3V
+   - PCM5102: ~15mA @ 3.3V
+
+   Total: ~175mA (any USB port or 5V/500mA supply sufficient)
+
+================================================================================
+5. COMPLETE PIN ASSIGNMENT TABLE
+================================================================================
+
+   RP2350 GPIO    Pico Pin    Function                Module/Pin
+   ───────────    ────────    ────────                ──────────
+   GPIO 4         Pin 6       I2C SDA                 OLED SDA
+   GPIO 5         Pin 7       I2C SCL                 OLED SCL
+   GPIO 6         Pin 9       Rotary Encoder A        OLED TRA
+   GPIO 7         Pin 10      Rotary Encoder B        OLED TRB
+   GPIO 8         Pin 11      Encoder Switch          OLED TRS
+   GPIO 9         Pin 12      Back Button             OLED BACK
+   GPIO 10        Pin 14      Confirm Button          OLED CONFIRM
+   GPIO 20        Pin 26      I2S Bit Clock           PCM1808 BCK, PCM5102 BCK
+   GPIO 21        Pin 27      I2S LR Clock            PCM1808 LRCK, PCM5102 LRCK
+   GPIO 22        Pin 29      I2S Data Out            PCM5102 DIN
+   GPIO 26        Pin 31      I2S Data In             PCM1808 DOUT
+
+   3V3(OUT)       Pin 36      3.3V Power              All modules VCC/VDD
+   GND            Pin 38      Ground                  All modules GND
+   VSYS/VBUS      Pin 39/40   5V Power Input          USB or External Supply
+
+================================================================================
+6. I2S AUDIO BUS SHARING
+================================================================================
+
+   The PCM1808 (ADC) and PCM5102 (DAC) share the I2S clock signals:
+
+   RP2350 GPIO 20 (BCK)  ──┬─► PCM1808 BCK
+                           └─► PCM5102 BCK
+
+   RP2350 GPIO 21 (LRCK) ──┬─► PCM1808 LRCK
+                           └─► PCM5102 LRCK
+
+   Data lines are separate:
+   RP2350 GPIO 26 ◄───────── PCM1808 DOUT (Input to RP2350)
+   RP2350 GPIO 22 ───────►─► PCM5102 DIN (Output from RP2350)
+
+================================================================================
+7. RECOMMENDED WIRING PRACTICES
+================================================================================
+
+   1. Keep I2C wires (SDA/SCL) short (<15cm) and twisted together
+
+   2. Use 100nF ceramic capacitors between VCC and GND on each module:
+      - Place as close as possible to the power pins
+      - One cap for OLED module
+      - One cap for PCM1808
+      - One cap for PCM5102
+
+   3. I2S audio wiring:
+      - Use twisted pairs for clock signals
+      - Keep data lines away from power wires
+      - Maximum length: 30cm recommended
+
+   4. Ground strategy:
+      - Connect all module grounds to a single RP2350 GND pin
+      - Use star grounding topology if possible
+
+   5. Shielding:
+      - Use shielded cable for audio input/output connections
+      - Connect shield to ground at one end only (RP2350 side)
+
+================================================================================
+8. BREADBOARD LAYOUT SUGGESTION
+================================================================================
+
+   Left Side:                    Right Side:
+   ┌─────────────┐              ┌─────────────┐
+   │ PCM1808 ADC │              │ 1.3" OLED   │
+   │  (INPUT)    │              │   Module    │
+   └─────────────┘              └─────────────┘
+          │                             │
+          │         ┌──────────┐        │
+          └────────►│  RP2350  │◄───────┘
+                    │  Pico 2  │
+          ┌────────►│          │
+          │         └──────────┘
+   ┌─────────────┐
+   │ PCM5102 DAC │
+   │  (OUTPUT)   │
+   └─────────────┘
+
+   USB Cable ──► Pico 2 USB-C Port (for power and programming)
+
+================================================================================
+9. TESTING AND VERIFICATION
+================================================================================
+
+   Step 1: Power Test
+   - Connect only power and ground to all modules
+   - Verify 3.3V on all VCC pins with multimeter
+   - Check for no short circuits
+
+   Step 2: Display Test
+   - Upload a simple U8g2 test sketch
+   - Verify OLED displays text correctly
+   - Test I2C address (should be 0x3C)
+
+   Step 3: Encoder Test
+   - Test rotary encoder rotation
+   - Verify encoder switch works
+   - Test BACK and CONFIRM buttons
+
+   Step 4: Audio Test
+   - Start with simple audio pass-through code
+   - Verify I2S clocks with oscilloscope (if available)
+   - Test with audio input → should appear at output
+
+   Step 5: Full System Test
+   - Upload complete multi-effect firmware
+   - Test each effect individually
+   - Verify UI navigation works correctly
+
+================================================================================
+10. TROUBLESHOOTING QUICK REFERENCE
+================================================================================
+
+   Issue: Display not working
+   → Check I2C connections (SDA, SCL)
+   → Verify I2C address: i2c_scan sketch
+   → Check 3.3V power supply
+
+   Issue: Encoder not responding
+   → Swap TRA/TRB if direction is reversed
+   → Check pull-up configuration (INPUT_PULLUP)
+   → Test encoder mechanically (should click)
+
+   Issue: No audio
+   → Verify all I2S connections (BCK, LRCK, DIN, DOUT)
+   → Check PCM5102 FMT pin is HIGH (3.3V)
+   → Test with headphones, not speakers initially
+
+   Issue: Distorted audio
+   → Reduce input level
+   → Check power supply quality (ripple)
+   → Verify ground connections
+
+================================================================================
+END OF WIRING DIAGRAM
+================================================================================
