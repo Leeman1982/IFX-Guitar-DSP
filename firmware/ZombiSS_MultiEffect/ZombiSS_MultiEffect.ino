@@ -110,6 +110,10 @@ void loop() {
 /* arduino-pico runs these on the second core automatically */
 
 void setup1() {
+    /* Wait for Core 0 to finish set_sys_clock_khz() before
+       initializing Wire. I2C clock divider depends on system clock. */
+    delay(300);
+
     /* Init OLED display */
     g_oled.init(OLED_SDA_PIN, OLED_SCL_PIN, OLED_I2C_ADDR);
 

@@ -46,7 +46,7 @@ void Splash_Show(SH1106 *oled) {
     oled->drawHLine(4, 40, 120);
 
     oled->drawString(10, 44, "MULTI-EFFECT DSP", false);
-    oled->drawString(28, 54, ":: RP2350 ::", false);
+    oled->drawString(28, 54, "::  RP2040 ::", false);
 
     oled->flush();
     delay(800);

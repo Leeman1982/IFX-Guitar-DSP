@@ -88,6 +88,12 @@ void loop() {
 /* ===== Core 1: UI ===== */
 
 void setup1() {
+    /* CRITICAL: Wait for Core 0 to finish set_sys_clock_khz() before
+       initializing Wire (I2C). Wire.setClock() calculates a divider from
+       the current system clock - if the clock changes after, the I2C
+       baud rate will be wrong and the OLED won't respond. */
+    delay(300);
+
     g_oled.init(OLED_SDA_PIN, OLED_SCL_PIN, OLED_I2C_ADDR);
     g_encoder.init();
     g_ui.init(&g_oled, &g_encoder, &g_fx_chain);
