@@ -37,16 +37,17 @@ void Splash_Show(SH1106 *oled) {
     oled->drawRect(0, 0, 128, 64);
     oled->drawRect(2, 2, 124, 60);
 
-    draw_skull(oled, 58, 6);
+    draw_skull(oled, 58, 5);
 
-    oled->drawStringLarge(5, 20, "ZOMBI", false);
-    draw_ss_rune(oled, 72, 22);
+    /* "ZOMBI SS" branding - 7x14 large font */
+    oled->drawStringLarge(20, 18, "ZOMBI", false);
+    draw_ss_rune(oled, 60, 20);
 
+    oled->drawHLine(4, 36, 120);
     oled->drawHLine(4, 38, 120);
-    oled->drawHLine(4, 40, 120);
 
-    oled->drawString(10, 44, "MULTI-EFFECT DSP", false);
-    oled->drawString(28, 54, "::  RP2040 ::", false);
+    oled->drawString(10, 42, "MULTI-EFFECT DSP", false);
+    oled->drawString(28, 52, "::  RP2040 ::", false);
 
     oled->flush();
     delay(800);

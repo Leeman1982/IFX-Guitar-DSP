@@ -82,7 +82,7 @@ void UISystem::drawParamEdit() {
 
     char val[16];
     format_value(val, sizeof(val), p->value, p->unit);
-    int tw = (int)strlen(val) * 12;
+    int tw = (int)strlen(val) * 8;  /* 7x14 font ~8px per char */
     int tx = (128 - tw) / 2;
     if (tx < 0) tx = 0;
     _oled->drawStringLarge(tx, 16, val, false);
@@ -108,7 +108,7 @@ void UISystem::drawMasterVol() {
 
     char val[10];
     snprintf(val, sizeof(val), "%d%%", (int)(_chain->masterVolume * 100.0f));
-    int tw = (int)strlen(val) * 12;
+    int tw = (int)strlen(val) * 8;  /* 7x14 font ~8px per char */
     int tx = (128 - tw) / 2;
     _oled->drawStringLarge(tx, 18, val, false);
 

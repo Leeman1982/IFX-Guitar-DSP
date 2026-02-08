@@ -3,9 +3,12 @@
  * =================================================
  * Target: RP2040 (Raspberry Pi Pico) via Arduino-Pico core
  *
+ * REQUIRED LIBRARY: Install "U8g2" via Arduino Library Manager
+ *   Sketch > Include Library > Manage Libraries > search "U8g2" > Install
+ *
  * Architecture:
  *   Core 0: Real-time audio DSP (PIO I2S + DMA interrupt)
- *   Core 1: UI (SH1106 OLED + EC11 rotary encoder + buttons)
+ *   Core 1: UI (SH1106 OLED via U8g2 + EC11 rotary encoder + buttons)
  *
  * RP2040 vs RP2350 differences:
  *   - 264KB SRAM → reduced delay buffer (375ms max vs 660ms)
@@ -88,12 +91,10 @@ void loop() {
 /* ===== Core 1: UI ===== */
 
 void setup1() {
-    /* CRITICAL: Wait for Core 0 to finish set_sys_clock_khz() before
-       initializing Wire (I2C). Wire.setClock() calculates a divider from
-       the current system clock - if the clock changes after, the I2C
-       baud rate will be wrong and the OLED won't respond. */
-    delay(300);
+    /* Short delay for Core 0 to finish clock setup */
+    delay(200);
 
+    /* OLED uses U8g2 software I2C (bit-bang) - no Wire dependency */
     g_oled.init(OLED_SDA_PIN, OLED_SCL_PIN, OLED_I2C_ADDR);
     g_encoder.init();
     g_ui.init(&g_oled, &g_encoder, &g_fx_chain);
