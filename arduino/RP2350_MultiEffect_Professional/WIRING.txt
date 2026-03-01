@@ -1,0 +1,460 @@
+================================================================================
+  RP2350 MULTI-EFFECT GUITAR UNIT - PROFESSIONAL LCD VERSION
+  Detailed Wiring Guide
+================================================================================
+
+COMPONENTS REQUIRED:
+- Raspberry Pi Pico 2 (RP2350)
+- 128x64 LCD Module with ST7567S Controller (I2C)
+- Rotary Encoder with Push Button (EC11/KY-040)
+- PCM1808 24-bit Stereo ADC
+- PCM5102 24-bit Stereo DAC
+- 5V Power Supply (USB or external, 500mA minimum)
+
+================================================================================
+1. ST7567S LCD DISPLAY CONNECTIONS (I2C)
+================================================================================
+
+   ST7567S LCD Module        Raspberry Pi Pico 2 (RP2350)
+   ──────────────────        ────────────────────────────
+
+   GND              ────────► GND (Pin 38 or any GND pin)
+   VCC              ────────► 3V3(OUT) (Pin 36) **3.3V ONLY!**
+   SCL              ────────► GPIO 5 (Pin 7) - I2C Clock
+   SDA              ────────► GPIO 4 (Pin 6) - I2C Data
+
+   IMPORTANT NOTES:
+   - ST7567S modules are 3.3V ONLY - Never connect to 5V!
+   - Common I2C addresses: 0x3F (most common) or 0x3C
+   - If display doesn't work, change LCD_I2C_ADDRESS in code
+   - Use short wires (<15cm) for reliable I2C communication
+   - Consider 4.7kΩ pull-up resistors on SDA/SCL if issues occur
+
+================================================================================
+2. ROTARY ENCODER CONNECTIONS
+================================================================================
+
+   Rotary Encoder (EC11)     Raspberry Pi Pico 2 (RP2350)
+   ─────────────────────     ────────────────────────────
+
+   CLK (or A, or S1)    ────► GPIO 6 (Pin 9) - Encoder Clock
+   DT (or B, or S2)     ────► GPIO 7 (Pin 10) - Encoder Data
+   SW (or KEY, or BTN)  ────► GPIO 8 (Pin 11) - Push Button Switch
+   GND                  ────► GND (Pin 38)
+   + (VCC, optional)    ────► 3V3(OUT) (Pin 36) or leave unconnected
+
+   ENCODER PIN VARIATIONS:
+   Different manufacturers use different pin labels:
+   - CLK = A = S1 = Encoder phase A
+   - DT = B = S2 = Encoder phase B
+   - SW = KEY = BTN = Push button switch
+
+   COMMON ENCODER PINOUTS:
+   ┌─────────────────┐
+   │ EC11 5-Pin      │
+   │ CLK DT SW + GND │
+   └─────────────────┘
+
+   Or:
+   ┌─────────────────┐
+   │ KY-040 Module   │
+   │ GND + SW DT CLK │
+   └─────────────────┘
+
+   NOTES:
+   - Internal pull-ups are enabled in software (INPUT_PULLUP)
+   - No external resistors required for most encoders
+   - If encoder is erratic, add 100nF capacitors:
+     - CLK to GND
+     - DT to GND
+     - SW to GND
+
+================================================================================
+3. PCM1808 ADC CONNECTIONS (Audio Input)
+================================================================================
+
+   PCM1808 ADC               Raspberry Pi Pico 2 (RP2350)
+   ───────────               ────────────────────────────
+
+   Power & Ground:
+   VDD              ────────► 3V3(OUT) (Pin 36)
+   GND (DGND, AGND) ────────► GND (Pin 38)
+
+   I2S Digital Audio:
+   DOUT             ────────► GPIO 26 (Pin 31) - I2S Data Out
+   LRCK             ────────► GPIO 21 (Pin 27) - I2S Left/Right Clock
+   BCK              ────────► GPIO 20 (Pin 26) - I2S Bit Clock
+
+   Configuration Pins:
+   SCKI             ────────► Not Connected (uses internal clock)
+   FMT              ────────► GND (I2S format, left-justified)
+   MD0              ────────► 3V3 (Slave mode)
+   MD1              ────────► 3V3 (Slave mode)
+   OSR0             ────────► Not Connected (optional)
+   OSR1             ────────► Not Connected (optional)
+   HPF              ────────► 3V3 (High-pass filter enabled, optional)
+
+   Analog Audio Input:
+   VINL (or LINL)   ────────► Left Audio Input (guitar, line level)
+   VINR (or RINL)   ────────► Right Audio Input
+
+   NOTES:
+   - Maximum input level: ~1.5Vrms (0dBV)
+   - For guitar: may need buffer/preamp stage
+   - For line level: direct connection OK
+   - Stereo input: connect same signal to both L/R for mono
+
+================================================================================
+4. PCM5102 DAC CONNECTIONS (Audio Output)
+================================================================================
+
+   PCM5102 DAC               Raspberry Pi Pico 2 (RP2350)
+   ───────────               ────────────────────────────
+
+   Power & Ground:
+   VCC (or DVCC)    ────────► 3V3(OUT) (Pin 36)
+   GND (DGND, AGND) ────────► GND (Pin 38)
+   CPVDD            ────────► 3V3 (if present)
+
+   I2S Digital Audio:
+   DIN              ────────► GPIO 22 (Pin 29) - I2S Data In
+   BCK              ────────► GPIO 20 (Pin 26) - I2S Bit Clock (SHARED with ADC)
+   LRCK (or WS)     ────────► GPIO 21 (Pin 27) - I2S LR Clock (SHARED with ADC)
+
+   Configuration Pins:
+   SCK              ────────► GND (auto clock mode)
+   FMT              ────────► 3V3 (I2S format)
+   DEMP             ────────► GND (de-emphasis off)
+   XSMT             ────────► 3V3 (soft mute disabled)
+   FLT (or FILTER)  ────────► GND (normal latency filter)
+
+   Analog Audio Output:
+   OUTL (or LOUT)   ────────► Left Audio Output (to amplifier/headphones)
+   OUTR (or ROUT)   ────────► Right Audio Output
+
+   NOTES:
+   - Output level: ~2Vrms (line level)
+   - Can drive headphones directly (low impedance)
+   - For speakers: requires external amplifier
+   - AC-coupled output (100µF capacitors recommended)
+
+================================================================================
+5. I2S AUDIO BUS TOPOLOGY
+================================================================================
+
+   The I2S clocks (BCK and LRCK) are SHARED between ADC and DAC:
+
+   RP2350 GPIO 20 (BCK)  ──┬─► PCM1808 BCK (Pin 13)
+                           └─► PCM5102 BCK
+
+   RP2350 GPIO 21 (LRCK) ──┬─► PCM1808 LRCK (Pin 15)
+                           └─► PCM5102 LRCK/WS
+
+   Data lines are separate (one input, one output):
+   RP2350 GPIO 26 ◄───────────── PCM1808 DOUT (Audio from ADC)
+   RP2350 GPIO 22 ──────────────► PCM5102 DIN (Audio to DAC)
+
+   This is a standard I2S bus configuration where:
+   - RP2350 is the I2S MASTER (generates clocks)
+   - PCM1808 is SLAVE (receives clocks)
+   - PCM5102 is SLAVE (receives clocks)
+
+================================================================================
+6. COMPLETE PIN ASSIGNMENT TABLE
+================================================================================
+
+   RP2350 GPIO    Pico Pin    Function                Module/Signal
+   ───────────    ────────    ────────                ─────────────
+   GPIO 4         Pin 6       I2C SDA                 LCD SDA
+   GPIO 5         Pin 7       I2C SCL                 LCD SCL
+   GPIO 6         Pin 9       Encoder CLK             Rotary Encoder A
+   GPIO 7         Pin 10      Encoder DT              Rotary Encoder B
+   GPIO 8         Pin 11      Encoder SW              Rotary Push Button
+   GPIO 20        Pin 26      I2S BCK                 PCM1808 & PCM5102
+   GPIO 21        Pin 27      I2S LRCK                PCM1808 & PCM5102
+   GPIO 22        Pin 29      I2S Data Out            PCM5102 DIN
+   GPIO 26        Pin 31      I2S Data In             PCM1808 DOUT
+
+   3V3(OUT)       Pin 36      3.3V Power              All modules
+   GND            Pin 38      Ground                  All modules
+   VSYS/VBUS      Pin 39/40   5V Power Input          USB or External
+
+================================================================================
+7. POWER DISTRIBUTION
+================================================================================
+
+   USB Power Option (Recommended):
+   ┌──────────────┐
+   │ USB-C Cable  │
+   └──────┬───────┘
+          │
+          ▼
+   ┌──────────────────┐
+   │ Raspberry Pi     │
+   │ Pico 2           │◄──── Powers all modules via 3.3V regulator
+   │ (RP2350)         │
+   └──────────────────┘
+          │ 3.3V out
+          ├──► LCD Module (~15mA)
+          ├──► Rotary Encoder (~0mA, passive)
+          ├──► PCM1808 ADC (~10mA)
+          └──► PCM5102 DAC (~15mA)
+
+   Total Current Draw: ~100mA (RP2350) + 40mA (peripherals) = 140mA
+   Any USB port provides sufficient power (500mA minimum)
+
+   External Power Option:
+   5V DC ──► VSYS (Pin 39) ─┬─► Internal 3.3V Regulator ──► Modules
+                            └─► RP2350 Core
+
+   Battery Power Option:
+   3.7V LiPo ──► VSYS (Pin 39) ──► (suitable for portable operation)
+
+   IMPORTANT POWER NOTES:
+   - Never exceed 3.6V on 3V3(OUT) pin
+   - Maximum current from 3.3V regulator: 300mA
+   - Use separate grounds for analog and digital (single point connection)
+   - Add decoupling capacitors close to each module:
+     * 100µF electrolytic + 100nF ceramic near Pico
+     * 100nF ceramic at each module's VCC pin
+
+================================================================================
+8. RECOMMENDED WIRING PRACTICES
+================================================================================
+
+   1. PCB Layout (if making a custom board):
+      - Keep I2C traces short and parallel
+      - Route I2S clocks as matched-length traces
+      - Separate analog and digital ground planes
+      - Star grounding: connect all grounds at one point
+
+   2. Breadboard Construction:
+      Left Side:                Right Side:
+      ┌──────────┐              ┌──────────┐
+      │ PCM1808  │              │  LCD     │
+      │   ADC    │              │ Display  │
+      └────┬─────┘              └────┬─────┘
+           │                         │
+           │      ┌──────────┐       │
+           └─────►│  RP2350  │◄──────┘
+                  │  Pico 2  │◄──── Rotary Encoder
+           ┌─────►│          │
+           │      └──────────┘
+      ┌────┴─────┐
+      │ PCM5102  │
+      │   DAC    │
+      └──────────┘
+
+   3. Wire Guidelines:
+      - I2C (SDA/SCL): <15cm, twisted pair, 22-24 AWG
+      - I2S (BCK/LRCK/DATA): <30cm, individual or twisted pairs
+      - Encoder: <20cm, individual wires OK
+      - Power: 20-22 AWG, as short as possible
+      - Audio: Shielded cable (shield to GND at RP2350 side only)
+
+   4. Grounding Strategy:
+      All grounds should connect to a single point (star topology):
+
+      PCM1808 GND ──┐
+      PCM5102 GND ──┤
+      LCD GND ──────┼──► RP2350 GND (Pin 38) ──► Power Supply GND
+      Encoder GND ──┘
+
+   5. Decoupling Capacitors (Critical!):
+      Place as close as possible to power pins:
+      - RP2350: 10µF + 100nF near Pin 36
+      - LCD: 100nF near VCC pin
+      - PCM1808: 10µF + 100nF near VDD
+      - PCM5102: 10µF + 100nF near VCC
+
+================================================================================
+9. TESTING PROCEDURE
+================================================================================
+
+   Step 1: Power-On Test
+   ──────────────────────
+   1. Connect only power and ground to RP2350
+   2. Measure 3.3V on Pin 36 (3V3OUT)
+   3. Connect LCD module
+   4. Measure 3.3V at LCD VCC pin
+   5. Verify no short circuits (measure resistance >1kΩ)
+
+   Step 2: Display Test
+   ─────────────────────
+   1. Upload a simple U8g2 I2C scanner sketch
+   2. Verify LCD detected at address 0x3F or 0x3C
+   3. Upload test sketch that displays text
+   4. If no display:
+      - Try alternate I2C address
+      - Check SDA/SCL connections
+      - Verify pull-up resistors (should be on module)
+      - Test with slower I2C speed (100kHz)
+
+   Step 3: Encoder Test
+   ─────────────────────
+   1. Upload encoder test sketch with Serial output
+   2. Rotate encoder - should see position changes
+   3. Press button - should see button events
+   4. If erratic: add 100nF debouncing capacitors
+   5. If backwards: swap CLK and DT pins
+
+   Step 4: Audio Loopback Test
+   ────────────────────────────
+   1. Upload simple I2S loopback code (bypass effects)
+   2. Connect audio source to PCM1808 input
+   3. Connect headphones/amplifier to PCM5102 output
+   4. Should hear audio pass through
+   5. If no audio:
+      - Check all I2S connections
+      - Verify PCM5102 FMT = HIGH
+      - Use oscilloscope to check BCK/LRCK signals
+      - Verify both ADC and DAC powered
+
+   Step 5: Full System Test
+   ─────────────────────────
+   1. Upload complete multi-effect firmware
+   2. Verify splash screen appears
+   3. Navigate through UI pages
+   4. Enable effects and adjust parameters
+   5. Test audio with each effect enabled
+   6. Monitor CPU usage on Info page
+
+================================================================================
+10. TROUBLESHOOTING GUIDE
+================================================================================
+
+   ISSUE: LCD shows nothing
+   ────────────────────────
+   Solutions:
+   □ Check 3.3V power at LCD module
+   □ Verify I2C connections (SDA, SCL)
+   □ Try alternate I2C address (change in code)
+   □ Run I2C scanner to detect address
+   □ Reduce I2C speed to 100kHz
+   □ Check for damaged LCD module
+   □ Verify contrast setting in code
+
+   ISSUE: LCD shows garbage/random pixels
+   ───────────────────────────────────────
+   Solutions:
+   □ Wrong controller - ensure ST7567S (not ST7565/SSD1306)
+   □ I2C speed too high - reduce to 100kHz
+   □ Poor connections - check wires
+   □ Power supply noise - add 100µF capacitor
+   □ Initialization sequence wrong - check U8g2 constructor
+
+   ISSUE: Encoder not responding
+   ──────────────────────────────
+   Solutions:
+   □ Verify CLK, DT, SW connections
+   □ Check INPUT_PULLUP in code
+   □ Test with multimeter - should see voltage changes
+   □ Swap CLK/DT if direction reversed
+   □ Add hardware debouncing (100nF caps)
+
+   ISSUE: No audio output
+   ──────────────────────
+   Solutions:
+   □ Check all I2S connections (BCK, LRCK, DIN, DOUT)
+   □ Verify PCM5102 FMT pin = HIGH (3.3V)
+   □ Check PCM1808 MD0, MD1 = HIGH
+   □ Ensure audio connected to PCM1808 input
+   □ Test with oscilloscope - should see signals on I2S pins
+   □ Verify both ADC and DAC have power
+   □ Check serial monitor for initialization messages
+
+   ISSUE: Audio distorted/clipping
+   ────────────────────────────────
+   Solutions:
+   □ Reduce input level (guitar volume)
+   □ Lower overdrive PreGain parameter
+   □ Check for DC offset at input
+   □ Verify power supply is clean (no ripple)
+   □ Add 100µF capacitors to power rails
+
+   ISSUE: Noise/hum in audio
+   ──────────────────────────
+   Solutions:
+   □ Use shielded cables for audio input/output
+   □ Connect shield to ground at one end only
+   □ Separate analog and digital grounds
+   □ Add ferrite beads on power lines
+   □ Use USB isolator if ground loop present
+   □ Move LCD/digital wiring away from audio
+
+   ISSUE: CPU load too high (>50%)
+   ────────────────────────────────
+   Solutions:
+   □ Reduce display update rate (increase update interval)
+   □ Disable unused effects
+   □ Increase audio buffer size (reduce latency requirement)
+   □ Enable compiler optimizations (-O3)
+   □ Remove debug Serial.print() statements
+
+================================================================================
+11. OSCILLOSCOPE CHECK POINTS (Advanced)
+================================================================================
+
+   For debugging with an oscilloscope:
+
+   I2S Bit Clock (BCK) - GPIO 20:
+   - Frequency: 1.536 MHz (48kHz × 32 bits)
+   - Square wave, 3.3V peak
+   - Should be stable and continuous
+
+   I2S Left/Right Clock (LRCK) - GPIO 21:
+   - Frequency: 48 kHz
+   - Square wave, 3.3V peak
+   - 50% duty cycle
+
+   I2S Data (DOUT/DIN) - GPIO 22/26:
+   - Serial data stream
+   - Changes on BCK edges
+   - Should show activity with audio present
+
+   I2C Clock (SCL) - GPIO 5:
+   - Frequency: 100-400 kHz (during display updates)
+   - Bursts of activity every 33ms (30Hz refresh)
+
+   I2C Data (SDA) - GPIO 4:
+   - Data bits synchronized with SCL
+   - Should show display update traffic
+
+================================================================================
+12. OPTIONAL ENHANCEMENTS
+================================================================================
+
+   1. External Footswitch:
+      - Connect momentary switch between GPIO 9 and GND
+      - Can be used for tap tempo or preset switching
+      - Add 100nF debouncing capacitor
+
+   2. LED Indicators:
+      - Connect LEDs (with 220Ω resistors) to free GPIOs
+      - Show effect enable/bypass status
+      - Typical: GPIO 10, 11, 12, 13 for 4 effects
+
+   3. Expression Pedal Input:
+      - Connect 10kΩ linear potentiometer:
+        - One end to 3.3V
+        - Other end to GND
+        - Wiper to ADC pin (e.g., GPIO 28 = ADC2)
+      - Use for real-time parameter control
+
+   4. MIDI Input:
+      - Add MIDI optocoupler circuit
+      - Connect to UART pins (GPIO 16/17)
+      - Enables MIDI control of parameters
+
+   5. Battery Power:
+      - Use 3.7V LiPo battery (2000mAh recommended)
+      - Connect through protection circuit
+      - Add charging circuit (TP4056 module)
+      - Estimated runtime: ~10 hours
+
+================================================================================
+END OF WIRING GUIDE
+================================================================================
+
+For more information, see README.md or visit:
+https://github.com/Leeman1982/IFX-Guitar-DSP

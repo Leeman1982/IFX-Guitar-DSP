@@ -1,0 +1,94 @@
+RP2350 Multi-Effect Unit - Wiring Diagram
+==========================================
+
+                                 ┌─────────────────────┐
+                                 │   RP2350 / Pico 2   │
+                                 │                     │
+                     I2S AUDIO   │                     │
+┌──────────────┐                 │                     │                 ┌──────────────┐
+│  PCM1808 ADC │                 │                     │                 │  PCM5102 DAC │
+│              │                 │                     │                 │              │
+│         DOUT ├─────────────────┤ GPIO 26 (I2S_RX)    │                 │              │
+│         LRCK ├────────┬────────┤ GPIO 21 (LRCK)      ├─────────┬───────┤ LRCK/WS      │
+│          BCK ├───────┬┴────────┤ GPIO 20 (BCK)       ├────────┬┴───────┤ BCK          │
+│          VCC ├───┐   │ │       │                     │        │ │      │ VCC          │
+│          GND ├─┐ │   │ │       │ GPIO 22 (I2S_TX)    ├────────┼─┼──────┤ DIN          │
+└──────────────┘ │ │   │ │       │                     │        │ │      │ GND      ────┤ SCK (to GND)
+                 │ │   │ │       │                     │        │ │      │ FMT      ────┤ (to 3.3V)
+                 │ │   │ │       │                     │        │ │      │ DEMP     ────┤ (to GND)
+                 │ │   │ │       │                     │        │ │      └──────────────┘
+                 │ │   │ │       │      I2C OLED       │        │ │
+                 │ │   │ │       │                     │        │ │      ┌──────────────┐
+                 │ │   │ │       │                     │        │ │      │ 0.93" OLED   │
+                 │ │   │ │       │                     │        │ │      │  (SSD1306)   │
+                 │ │   │ │       │ GPIO 4  (SDA)       ├────────┼─┼──────┤ SDA          │
+                 │ │   │ │       │ GPIO 5  (SCL)       ├────────┼─┼──┐   │ SCL          │
+                 │ │   │ │       │                     │        │ │  │   │ VCC          │
+                 │ │   │ │       │  ROTARY ENCODER     │        │ │  │   │ GND          │
+                 │ │   │ │       │                     │        │ │  │   └──────────────┘
+                 │ │   │ │       │                     │        │ │  │
+                 │ │   │ │       │ GPIO 6  (ENC_CLK)   ├────────┼─┼──┼───┐
+                 │ │   │ │       │ GPIO 7  (ENC_DT)    ├────────┼─┼──┼───┼───┐
+                 │ │   │ │       │ GPIO 8  (ENC_SW)    ├────────┼─┼──┼───┼───┼───┐
+                 │ │   │ │       │                     │        │ │  │   │   │   │
+                 │ │   │ │       │                     │        │ │  │   │   │   │   ┌────────────┐
+                 │ │   │ │       │ 3.3V                ├────────┼─┼──┼───┼───┼───┼───┤ Rotary Enc │
+                 │ │   │ │       │ GND                 ├────────┼─┼──┼───┼───┼───┼───┤            │
+                 │ │   │ │       └─────────────────────┘        │ │  │   │   │   │   │ CLK        │
+                 │ │   │ │                                       │ │  │   │   │   │   │ DT         │
+                 │ │   │ │                                       │ │  │   │   │   │   │ SW         │
+                 │ │   │ └───────────────────────────────────────┘ │  │   │   │   │   │ +          │
+                 │ │   └───────────────────────────────────────────┘  │   │   │   │   │ GND        │
+                 │ └───────────────────────────────────────────────────┘   │   │   │   └────────────┘
+                 └─────────────────────────────────────────────────────────┼───┼───┘
+                                                                           │   │
+                                                                           └───┘
+                                                                          GND  3.3V
+
+Power Supply:
+=============
+- Use USB power (5V) for RP2350
+- RP2350 provides 3.3V for all peripherals
+- Ensure adequate current capacity (500mA recommended)
+
+Audio Connections:
+==================
+INPUT:
+  Guitar/Instrument → 1/4" Jack → Audio Input Circuit → PCM1808
+
+OUTPUT:
+  PCM5102 → Audio Output Circuit → 1/4" Jack → Amplifier
+
+Notes:
+======
+1. PCM1808 and PCM5102 require proper analog input/output circuitry
+   (AC coupling capacitors, input/output impedance matching)
+
+2. Add 0.1µF decoupling capacitors near VCC pins of all ICs
+
+3. Keep I2S signal traces short and away from analog audio
+
+4. Use proper ground plane for audio quality
+
+5. Consider adding ferrite beads on power lines for noise reduction
+
+6. PCM5102 SCK pin to GND enables auto clock mode
+   PCM5102 FMT pin to 3.3V selects I2S format
+
+Signal Levels:
+==============
+- Digital I/O: 3.3V logic
+- Audio ADC: 2Vrms max input (configure with input attenuator)
+- Audio DAC: 2Vrms output (configure with output buffer)
+
+Pin Summary:
+============
+GPIO 4:  I2C SDA (OLED)
+GPIO 5:  I2C SCL (OLED)
+GPIO 6:  Encoder CLK
+GPIO 7:  Encoder DT
+GPIO 8:  Encoder SW
+GPIO 20: I2S BCK (Bit Clock)
+GPIO 21: I2S LRCK (Left/Right Clock)
+GPIO 22: I2S TX (to DAC)
+GPIO 26: I2S RX (from ADC)
