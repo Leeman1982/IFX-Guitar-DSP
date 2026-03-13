@@ -47,7 +47,8 @@ private:
     UIScreen _screen;
     uint8_t _selectedEffect;
     uint8_t _selectedParam;
-    uint8_t _scrollOffset;
+    uint8_t _scrollOffset;       /* param list scroll offset */
+    uint8_t _chainScrollOffset;  /* chain view scroll offset (6 effects, 5 visible) */
     bool _needsRedraw;
 };
 

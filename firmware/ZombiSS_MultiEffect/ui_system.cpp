@@ -18,19 +18,35 @@ void UISystem::drawChainView() {
     _oled->fillRect(0, 0, 128, 9, true);
     _oled->drawString(1, 1, "ZOMBI SS  FX CHAIN", true);
 
-    for (int i = 0; i < FX_COUNT; i++) {
-        int y = 12 + i * 10;
-        bool sel = (i == _selectedEffect);
-        bool act = _chain->active[i];
+    /* Show 5 effects at a time; scroll if FX_COUNT > 5 */
+    const uint8_t maxVis = 5;
+    if (_selectedEffect < _chainScrollOffset)
+        _chainScrollOffset = _selectedEffect;
+    if (_selectedEffect >= _chainScrollOffset + maxVis)
+        _chainScrollOffset = _selectedEffect - maxVis + 1;
+
+    for (uint8_t i = 0; i < maxVis && (i + _chainScrollOffset) < FX_COUNT; i++) {
+        uint8_t fi = i + _chainScrollOffset;
+        int y = 11 + i * 10;
+        bool sel = (fi == _selectedEffect);
+        bool act = _chain->active[fi];
         if (sel) _oled->fillRect(0, y, 128, 10, true);
 
         char line[22];
-        snprintf(line, sizeof(line), "%d %s%-6s", i+1, act ? "[ON]  " : "[OFF] ", _chain->fxNames[i]);
+        snprintf(line, sizeof(line), "%d %s%-8s", fi+1, act ? "[ON]  " : "[OFF] ", _chain->fxNames[fi]);
         _oled->drawString(2, y+1, line, sel);
 
         if (act && !sel) _oled->fillRect(122, y+2, 4, 6, true);
     }
-    _oled->drawString(0, 57, "Turn:Sel  Push:Edit", false);
+
+    /* Scroll indicators replace help text when list overflows */
+    if (_chainScrollOffset > 0)
+        _oled->drawString(118, 11, "^", false);
+    if (_chainScrollOffset + maxVis < FX_COUNT)
+        _oled->drawString(118, 57, "v", false);
+    else
+        _oled->drawString(0, 57, "Turn:Sel Push:Edit", false);
+
     _oled->flush();
 }
 
@@ -172,11 +188,12 @@ void UISystem::handleMasterVol(EncoderEvent evt) {
 
 void UISystem::handleFxToggle(EncoderEvent evt) {
     switch (evt) {
-    case ENC_EVENT_FX1_TOGGLE: EffectChain_ToggleEffect(_chain, FX_NOISEGATE); break;
-    case ENC_EVENT_FX2_TOGGLE: EffectChain_ToggleEffect(_chain, FX_OVERDRIVE); break;
-    case ENC_EVENT_FX3_TOGGLE: EffectChain_ToggleEffect(_chain, FX_EQ);        break;
-    case ENC_EVENT_FX4_TOGGLE: EffectChain_ToggleEffect(_chain, FX_CHORUS);    break;
-    case ENC_EVENT_FX5_TOGGLE: EffectChain_ToggleEffect(_chain, FX_DELAY);     break;
+    case ENC_EVENT_FX1_TOGGLE: EffectChain_ToggleEffect(_chain, FX_TSBOOST);   break;
+    case ENC_EVENT_FX2_TOGGLE: EffectChain_ToggleEffect(_chain, FX_NOISEGATE); break;
+    case ENC_EVENT_FX3_TOGGLE: EffectChain_ToggleEffect(_chain, FX_OVERDRIVE); break;
+    case ENC_EVENT_FX4_TOGGLE: EffectChain_ToggleEffect(_chain, FX_EQ);        break;
+    case ENC_EVENT_FX5_TOGGLE: EffectChain_ToggleEffect(_chain, FX_CHORUS);    break;
+    /* FX_DELAY has no footswitch — toggled via OLED menu CONFIRM button */
     default: break;
     }
     _needsRedraw = true;
@@ -190,6 +207,7 @@ void UISystem::init(SH1106 *oled, RotaryEncoder *encoder, EffectChain *chain) {
     _selectedEffect = 0;
     _selectedParam = 0;
     _scrollOffset = 0;
+    _chainScrollOffset = 0;
     _needsRedraw = true;
 }
 

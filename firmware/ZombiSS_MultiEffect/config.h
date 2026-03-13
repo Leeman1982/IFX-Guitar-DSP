@@ -39,11 +39,12 @@
 #define SWITCH_CONFIRM_PIN    15
 
 /* ===== Effect Bypass Momentary Switches ===== */
-#define SWITCH_FX1_PIN        6     /* Noise Gate */
-#define SWITCH_FX2_PIN        7     /* Overdrive */
-#define SWITCH_FX3_PIN        8     /* EQ */
-#define SWITCH_FX4_PIN        9     /* Chorus */
-#define SWITCH_FX5_PIN        13    /* Delay */
+#define SWITCH_FX1_PIN        6     /* TS Boost   (FX_TSBOOST)   */
+#define SWITCH_FX2_PIN        7     /* Noise Gate (FX_NOISEGATE) */
+#define SWITCH_FX3_PIN        8     /* Overdrive  (FX_OVERDRIVE) */
+#define SWITCH_FX4_PIN        9     /* 10-Band EQ (FX_EQ)        */
+#define SWITCH_FX5_PIN        13    /* Chorus     (FX_CHORUS)    */
+/* FX_DELAY has no dedicated footswitch — toggle via OLED menu   */
 
 /* ===== Debounce ===== */
 #define DEBOUNCE_MS           5
