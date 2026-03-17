@@ -47,8 +47,21 @@ void SH1106::init(uint8_t sda_pin, uint8_t scl_pin, uint8_t addr) {
     sendCmd(0xA8); sendCmd(0x3F);  /* Multiplex 64 */
     sendCmd(0xD3); sendCmd(0x00);  /* Display offset 0 */
     sendCmd(0x40);  /* Start line 0 */
-    sendCmd(0xAD); sendCmd(0x8B);  /* DC-DC ON (internal charge pump) */
+
+    /* Force page addressing mode.  SSD1306 powers up in horizontal mode
+     * which breaks SH1106-style page/column address commands in flush().
+     * SH1106 treats unknown commands as no-ops — safe to send. */
+    sendCmd(0x20); sendCmd(0x02);
+
+    /* Charge pump — SH1106 style (ignored by SSD1306) */
+    sendCmd(0xAD); sendCmd(0x8B);  /* DC-DC ON */
     sendCmd(0x32);  /* Pump voltage 8.0V */
+
+    /* Charge pump — SSD1306 style (ignored by SH1106 after 0xAD/0x8B).
+     * Many modules sold as "SH1106" use an SSD1306 controller; without
+     * this the VDDP rail never comes up and the panel stays blank. */
+    sendCmd(0x8D); sendCmd(0x14);
+
     sendCmd(0xA1);  /* Segment remap (flip horizontal) */
     sendCmd(0xC8);  /* COM scan direction (flip vertical) */
     sendCmd(0xDA); sendCmd(0x12);  /* COM pins config */
