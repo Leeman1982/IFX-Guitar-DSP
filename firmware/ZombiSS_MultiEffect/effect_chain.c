@@ -1,5 +1,9 @@
 #include "effect_chain.h"
 
+/* Compile-time guard: EQ param count must match the actual number of EQ bands */
+_Static_assert(EQ_PARAM_COUNT == EQ10_BANDS,
+    "EQ_PARAM_COUNT in effect_chain.h must equal EQ10_BANDS in ifx_10band_eq.h");
+
 static void init_param_descs(EffectChain *ec) {
 
     /* ===== TS Boost ===== */
@@ -93,11 +97,8 @@ void EffectChain_Init(EffectChain *ec) {
     IFX_Overdrive_SetQ(&ec->overdrive, ec->params[FX_OVERDRIVE][OD_Q_CLIP].value);
 
     IFX_10BandEQ_Init(&ec->eq, SAMPLE_RATE_HZ);
-    /* Defaults already loaded from IFX_EQ10_METALLICA_PRESET in Init,
-     * but sync the param values back so the UI reflects actuals. */
-    for (uint8_t b = 0; b < EQ_PARAM_COUNT; b++) {
-        IFX_10BandEQ_SetBand(&ec->eq, b, ec->params[FX_EQ][b].value);
-    }
+    /* Init already loads IFX_EQ10_METALLICA_PRESET; param defaults above
+     * match that preset exactly, so no further SetBand calls are needed. */
 
     IFX_Chorus_Init(&ec->chorus,
         ec->params[FX_CHORUS][CH_DELAY_A].value,

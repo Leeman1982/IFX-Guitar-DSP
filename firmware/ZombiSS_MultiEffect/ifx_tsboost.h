@@ -40,8 +40,6 @@ typedef struct {
 
     /* Output level */
     float level;
-
-    float out;
 } IFX_TSBoost;
 
 void  IFX_TSBoost_Init(IFX_TSBoost *ts, float sampleRate_Hz);

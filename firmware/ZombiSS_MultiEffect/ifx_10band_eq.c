@@ -4,6 +4,11 @@
 #define M_PI 3.14159265358979323846f
 #endif
 
+/* dB to linear amplitude: used only at init/param-change, not in hot path */
+static inline float db_to_linear(float db) {
+    return powf(10.0f, db / 20.0f);
+}
+
 const float IFX_EQ10_FREQS[EQ10_BANDS] = {
     31.25f, 62.5f, 125.0f, 250.0f, 500.0f,
     1000.0f, 2000.0f, 4000.0f, 8000.0f, 16000.0f
@@ -30,18 +35,16 @@ void IFX_10BandEQ_Init(IFX_10BandEQ *eq, float sampleRate_Hz) {
         float fc = IFX_EQ10_FREQS[i];
         /* Q = 1.41 for octave bandwidth → bw = fc / Q */
         float bw = fc / 1.41f;
-        float linear = powf(10.0f, eq->gainDb[i] / 20.0f);
-        IFX_PeakingFilter_SetParameters(&eq->bands[i], fc, bw, linear);
+        IFX_PeakingFilter_SetParameters(&eq->bands[i], fc, bw, db_to_linear(eq->gainDb[i]));
     }
 }
 
 void IFX_10BandEQ_SetBand(IFX_10BandEQ *eq, uint8_t band, float gainDb) {
     if (band >= EQ10_BANDS) return;
     eq->gainDb[band] = gainDb;
-    float fc  = IFX_EQ10_FREQS[band];
-    float bw  = fc / 1.41f;
-    float lin = powf(10.0f, gainDb / 20.0f);
-    IFX_PeakingFilter_SetParameters(&eq->bands[band], fc, bw, lin);
+    float fc = IFX_EQ10_FREQS[band];
+    float bw = fc / 1.41f;
+    IFX_PeakingFilter_SetParameters(&eq->bands[band], fc, bw, db_to_linear(gainDb));
 }
 
 float IFX_10BandEQ_Update(IFX_10BandEQ *eq, float in) {
