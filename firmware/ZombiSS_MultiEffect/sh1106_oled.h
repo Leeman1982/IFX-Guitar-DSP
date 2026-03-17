@@ -8,7 +8,7 @@
 #define SH1106_WIDTH       128
 #define SH1106_HEIGHT       64
 #define SH1106_PAGES        (SH1106_HEIGHT / 8)
-#define SH1106_COL_OFFSET   2
+#define SH1106_COL_OFFSET   0   /* SSD1306 has no column offset (SH1106 uses 2) */
 
 class SH1106 {
 public:
