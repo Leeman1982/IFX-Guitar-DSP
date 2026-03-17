@@ -27,25 +27,25 @@ void UISystem::drawChainView() {
 
     for (uint8_t i = 0; i < maxVis && (i + _chainScrollOffset) < FX_COUNT; i++) {
         uint8_t fi = i + _chainScrollOffset;
-        int y = 11 + i * 10;
+        int y = 10 + i * 9;  /* rows at y=10,19,28,37,46; last ends at y=54, footer at y=57 */
         bool sel = (fi == _selectedEffect);
         bool act = _chain->active[fi];
-        if (sel) _oled->fillRect(0, y, 128, 10, true);
+        if (sel) _oled->fillRect(0, y, 128, 9, true);
 
         char line[22];
         snprintf(line, sizeof(line), "%d %s%-8s", fi+1, act ? "[ON]  " : "[OFF] ", _chain->fxNames[fi]);
         _oled->drawString(2, y+1, line, sel);
 
-        if (act && !sel) _oled->fillRect(122, y+2, 4, 6, true);
+        if (act && !sel) _oled->fillRect(122, y+2, 4, 5, true);
     }
 
-    /* Scroll indicators replace help text when list overflows */
+    /* Scroll indicators in header right side (invert=true = black on white bar) */
     if (_chainScrollOffset > 0)
-        _oled->drawString(118, 11, "^", false);
+        _oled->drawString(112, 1, "^", true);
     if (_chainScrollOffset + maxVis < FX_COUNT)
-        _oled->drawString(118, 57, "v", false);
-    else
-        _oled->drawString(0, 57, "Turn:Sel Push:Edit", false);
+        _oled->drawString(118, 1, "v", true);
+
+    _oled->drawString(0, 57, "Turn:Sel Push:Edit", false);
 
     _oled->flush();
 }
