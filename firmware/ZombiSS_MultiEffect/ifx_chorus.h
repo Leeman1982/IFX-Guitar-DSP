@@ -44,6 +44,7 @@ void  IFX_Chorus_Init(IFX_Chorus *cho,
                        float rateA, float rateB,
                        float mix, float sampleRateHz);
 float IFX_Chorus_Update(IFX_Chorus *cho, float inp);
+void  IFX_Chorus_SetDelayTime(IFX_Chorus *cho, float delayTimeMsA, float delayTimeMsB);
 void  IFX_Chorus_SetDepth(IFX_Chorus *cho, float depthA, float depthB);
 void  IFX_Chorus_SetRate(IFX_Chorus *cho, float rateA, float rateB);
 void  IFX_Chorus_SetGain(IFX_Chorus *cho, float gainA, float gainB);

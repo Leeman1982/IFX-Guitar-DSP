@@ -47,8 +47,12 @@ void IFX_NoiseGate_SetThreshold(IFX_NoiseGate *ng, float threshold) {
 
 void IFX_NoiseGate_SetAttackRelease(IFX_NoiseGate *ng, float attackTimeMs,
                                      float releaseTimeMs, float sampleRateHz) {
-    ng->attackCoeff  = expf(-2197.22457734f / (sampleRateHz * attackTimeMs));
-    ng->releaseCoeff = expf(-2197.22457734f / (sampleRateHz * releaseTimeMs));
+    /* attackCoeff  is used in the gate-CLOSING branch (signal below threshold).
+     * releaseCoeff is used in the gate-OPENING branch (signal above threshold).
+     * Standard gate convention: Attack = time to open, Release = time to close.
+     * Cross-assign so the user-facing labels behave correctly. */
+    ng->attackCoeff  = expf(-2197.22457734f / (sampleRateHz * releaseTimeMs));
+    ng->releaseCoeff = expf(-2197.22457734f / (sampleRateHz * attackTimeMs));
 }
 
 void IFX_NoiseGate_SetHoldTime(IFX_NoiseGate *ng, float holdTimeMs) {

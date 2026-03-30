@@ -185,6 +185,10 @@ void EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, 
 
     case FX_CHORUS:
         switch (paramIndex) {
+        case CH_DELAY_A: case CH_DELAY_B:
+            IFX_Chorus_SetDelayTime(&ec->chorus,
+                ec->params[FX_CHORUS][CH_DELAY_A].value,
+                ec->params[FX_CHORUS][CH_DELAY_B].value); break;
         case CH_DEPTH_A: case CH_DEPTH_B:
             IFX_Chorus_SetDepth(&ec->chorus,
                 ec->params[FX_CHORUS][CH_DEPTH_A].value,

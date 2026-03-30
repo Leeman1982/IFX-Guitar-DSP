@@ -70,6 +70,18 @@ float IFX_Chorus_Update(IFX_Chorus *cho, float inp) {
     return cho->out;
 }
 
+void IFX_Chorus_SetDelayTime(IFX_Chorus *cho, float delayTimeMsA, float delayTimeMsB) {
+    float sampleRateHz = 1.0f / cho->sampleTime;
+    cho->delayLineBaseLengthA = (uint16_t)(0.001f * delayTimeMsA * sampleRateHz);
+    cho->delayLineBaseLengthB = (uint16_t)(0.001f * delayTimeMsB * sampleRateHz);
+    if (cho->delayLineBaseLengthA < 1) cho->delayLineBaseLengthA = 1;
+    if (cho->delayLineBaseLengthB < 1) cho->delayLineBaseLengthB = 1;
+    if (cho->delayLineBaseLengthA >= IFX_CHORUS_MAX_DELAY_LENGTH)
+        cho->delayLineBaseLengthA = IFX_CHORUS_MAX_DELAY_LENGTH - 1;
+    if (cho->delayLineBaseLengthB >= IFX_CHORUS_MAX_DELAY_LENGTH)
+        cho->delayLineBaseLengthB = IFX_CHORUS_MAX_DELAY_LENGTH - 1;
+}
+
 void IFX_Chorus_SetDepth(IFX_Chorus *cho, float depthA, float depthB) {
     cho->depthA = depthA;
     cho->depthB = depthB;
