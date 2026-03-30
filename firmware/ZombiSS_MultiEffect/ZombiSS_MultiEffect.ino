@@ -20,6 +20,7 @@
  */
 
 #include <Arduino.h>
+#include "hardware/pwm.h"
 #include "config.h"
 
 #ifdef __cplusplus
@@ -57,8 +58,12 @@ static void audio_process_callback(const int32_t *input, int32_t *output, uint32
         /* Read left channel (mono guitar input) */
         int32_t raw_left = input[i * 2];
 
-        /* 24-bit I2S → float [-1.0, +1.0] */
-        float inp = (float)(raw_left >> 8) / 8388608.0f;
+        /* 24-bit I2S → float [-1.0, +1.0]
+         * I2S standard has a 1-bit delay: first BCK rising edge after LRCK
+         * holds old data; actual MSB starts on the second rising edge.
+         * The raw 32-bit word is: [delay_bit | audio_23..0 | padding_6bits]
+         * Shift out the delay bit before extracting the 24-bit value. */
+        float inp = (float)((raw_left << 1) >> 8) / 8388608.0f;
 
         /* Process effect chain */
         float out = EffectChain_Process(&g_fx_chain, inp);
@@ -80,6 +85,21 @@ static void audio_process_callback(const int32_t *input, int32_t *output, uint32
 void setup() {
     /* Overclock to 150 MHz for DSP headroom */
     set_sys_clock_khz(SYS_CLOCK_KHZ, true);
+
+    /* Generate SCKI for PCM1808 ADC on GP22.
+     * PCM1808 slave mode still requires SCKI for its internal sigma-delta
+     * converter — without it the ADC produces no output and there is silence.
+     * Target: 256 × 48000 = 12.288 MHz.
+     * PWM: 150 MHz / 12 = 12.5 MHz (1.7% off, within PCM1808 tolerance). */
+    {
+        uint scki_slice = pwm_gpio_to_slice_num(22);
+        uint scki_chan  = pwm_gpio_to_channel(22);
+        gpio_set_function(22, GPIO_FUNC_PWM);
+        pwm_set_clkdiv(scki_slice, 1.0f);
+        pwm_set_wrap(scki_slice, 11);               /* 12 counts → 12.5 MHz  */
+        pwm_set_chan_level(scki_slice, scki_chan, 6); /* 50% duty cycle       */
+        pwm_set_enabled(scki_slice, true);
+    }
 
     Serial.begin(115200);
 
