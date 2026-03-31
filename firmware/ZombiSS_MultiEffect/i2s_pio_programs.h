@@ -116,7 +116,7 @@ static inline void i2s_out_program_init(PIO pio, uint sm, uint offset,
  *   wait 0 pin 2        ; 9:  Wait for BCK low
  *   wait 1 pin 2        ; 10: Wait for BCK high (rising edge)
  *   in pins, 1          ; 11: Sample DOUT
- *   jmp x-- right_loop  ; 12: Next bit
+ *   jmp x-- right_loop  ; 12: Next bit (target=9, NOT 8)
  *   push block           ; 13: Push 32-bit right sample
  * .wrap_target
  *   jmp wait_left       ; 14: Loop
@@ -136,7 +136,7 @@ static const uint16_t i2s_in_program_instructions[] = {
     0x2022, /*  9: wait 0 pin 2       */
     0x20A2, /* 10: wait 1 pin 2       */
     0x4001, /* 11: in pins, 1         */
-    0x00C8, /* 12: jmp x--, 8         */
+    0x00C9, /* 12: jmp x--, 9         */
     0x8020, /* 13: push block         */
     0x0000, /* 14: jmp 0              */
 };
