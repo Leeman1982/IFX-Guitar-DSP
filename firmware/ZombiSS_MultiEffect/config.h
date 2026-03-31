@@ -46,6 +46,10 @@
 #define SWITCH_FX5_PIN        13    /* Chorus     (FX_CHORUS)    */
 /* FX_DELAY has no dedicated footswitch — toggle via OLED menu   */
 
+/* ===== PCM5102 DAC Control ===== */
+#define PCM5102_XSMT_PIN      0     /* GP0 → XSMT: drive HIGH to unmute analog output */
+/* Note: FMT pin tie to GND (I2S standard), SCK tie to GND (no SCK mode) on your module */
+
 /* ===== Debounce ===== */
 #define DEBOUNCE_MS           5
 #define LONG_PRESS_MS         500

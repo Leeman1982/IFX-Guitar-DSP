@@ -21,6 +21,8 @@
 
 #include <Arduino.h>
 #include "hardware/pwm.h"
+#include "hardware/gpio.h"
+#include <math.h>
 #include "config.h"
 
 #ifdef __cplusplus
@@ -47,32 +49,64 @@ static SH1106 g_oled;
 static RotaryEncoder g_encoder;
 static UISystem g_ui;
 
+/* ===== Diagnostic test tone state ===== */
+/* Plays a 1kHz sine wave for 2 seconds on boot to verify DAC hardware
+ * independently of the ADC. If you hear this tone, the DAC pipeline works.
+ * If silent, the problem is hardware: check XSMT wiring, I2S connections. */
+#define TONE_DURATION_FRAMES  (AUDIO_SAMPLE_RATE * 2)   /* 2 seconds */
+static volatile uint32_t tone_phase_acc = 0;
+/* Phase increment for 1kHz at 48kHz: 1000/48000 * 2^32 ≈ 89478.5 → 89479 */
+static const uint32_t TONE_PHASE_INC = 89479U;
+
 /* ===== Core 0: Audio DSP Callback ===== */
 
 /*
  * Called from DMA IRQ on Core 0.
  * Latency: 64 frames / 48kHz = ~1.33ms per buffer = ~2.67ms round-trip.
  */
-static void audio_process_callback(const int32_t *input, int32_t *output, uint32_t frame_count) {
-    for (uint32_t i = 0; i < frame_count; i++) {
-        /* Read left channel (mono guitar input) */
-        int32_t raw_left = input[i * 2];
+static void audio_process_callback(const int32_t *input, int32_t *output, uint32_t frame_count_arg) {
+    static uint32_t total_frames = 0;
 
-        /* 24-bit I2S → float [-1.0, +1.0]
-         * I2S standard has a 1-bit delay: first BCK rising edge after LRCK
-         * holds old data; actual MSB starts on the second rising edge.
-         * The raw 32-bit word is: [delay_bit | audio_23..0 | padding_6bits]
-         * Shift out the delay bit before extracting the 24-bit value. */
-        float inp = (float)((raw_left << 1) >> 8) / 8388608.0f;
+    for (uint32_t i = 0; i < frame_count_arg; i++) {
+        int32_t out_i32;
 
-        /* Process effect chain */
-        float out = EffectChain_Process(&g_fx_chain, inp);
+        if (total_frames < TONE_DURATION_FRAMES) {
+            /* --- Diagnostic 1kHz sine tone (first 2 seconds) --- */
+            /* Fast sine approximation using phase accumulator.
+             * Maps 0–2^32 → 0–2π via Bhaskara I approximation. */
+            uint32_t phase = tone_phase_acc;
+            tone_phase_acc += TONE_PHASE_INC;
 
-        /* Float → 24-bit I2S (left-justified in 32-bit word) */
-        int32_t out_i32 = (int32_t)(out * 8388607.0f);
-        if (out_i32 >  8388607) out_i32 =  8388607;
-        if (out_i32 < -8388608) out_i32 = -8388608;
-        out_i32 <<= 8;
+            /* Normalise phase to [0, 1) then use sinf for correctness */
+            float t   = (float)phase * (1.0f / 4294967296.0f); /* 0..1 */
+            float s   = sinf(t * 6.2831853f) * 0.5f;           /* ±0.5 amplitude */
+
+            out_i32 = (int32_t)(s * 8388607.0f);
+            if (out_i32 >  8388607) out_i32 =  8388607;
+            if (out_i32 < -8388608) out_i32 = -8388608;
+            out_i32 <<= 8;
+
+            total_frames++;
+        } else {
+            /* --- Normal guitar processing --- */
+            int32_t raw_left = input[i * 2];
+
+            /* 24-bit I2S → float [-1.0, +1.0]
+             * I2S standard has a 1-bit delay: first BCK rising edge after LRCK
+             * holds old data; actual MSB starts on the second rising edge.
+             * The raw 32-bit word is: [delay_bit | audio_23..0 | padding_6bits]
+             * Shift out the delay bit before extracting the 24-bit value. */
+            float inp = (float)((raw_left << 1) >> 8) / 8388608.0f;
+
+            /* Process effect chain */
+            float out = EffectChain_Process(&g_fx_chain, inp);
+
+            /* Float → 24-bit I2S (left-justified in 32-bit word) */
+            out_i32 = (int32_t)(out * 8388607.0f);
+            if (out_i32 >  8388607) out_i32 =  8388607;
+            if (out_i32 < -8388608) out_i32 = -8388608;
+            out_i32 <<= 8;
+        }
 
         /* Stereo output (same signal both channels) */
         output[i * 2]     = out_i32;
@@ -100,6 +134,14 @@ void setup() {
         pwm_set_chan_level(scki_slice, scki_chan, 6); /* 50% duty cycle       */
         pwm_set_enabled(scki_slice, true);
     }
+
+    /* PCM5102: drive XSMT HIGH to unmute DAC analog output.
+     * Without this the PCM5102 output stage is in soft-mute regardless of
+     * valid I2S data — the most common cause of complete DAC silence.
+     * XSMT must be driven; leaving it floating or low keeps the mute active. */
+    gpio_init(PCM5102_XSMT_PIN);
+    gpio_set_dir(PCM5102_XSMT_PIN, GPIO_OUT);
+    gpio_put(PCM5102_XSMT_PIN, 1);
 
     Serial.begin(115200);
 
