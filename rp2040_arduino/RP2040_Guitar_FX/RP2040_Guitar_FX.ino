@@ -79,18 +79,20 @@ static MuxScanner mux;
 static LCDMenu    menu(LCD_I2C_ADDR, 16, 2);
 
 // =============================================================================
-// SCKI generation – ~12.288 MHz via RP2040 PWM
-// At 98.304 MHz sys clock:  wrap = 98304000/12288000 - 1 = 7
-// PWM toggles at wrap+1 = 8 clocks → 98.304/8 = 12.288 MHz  ✓
+// SCKI generation – ~12.5 MHz via RP2040 PWM  (PCM1808 system clock)
+// At 250 MHz sys clock:  wrap = 19  →  period = 20 clocks
+// Frequency = 250 000 000 / 20 = 12 500 000 Hz  (ideal 12 288 000, Δ = +1.7 %)
+// PCM1808 slave mode tolerates ±5 % on SCKI – well within spec.
+// 50 % duty: level = (wrap + 1) / 2 = 10
 // =============================================================================
 static void scki_pwm_init()
 {
     gpio_set_function(PIN_SCKI, GPIO_FUNC_PWM);
     uint slice = pwm_gpio_to_slice_num(PIN_SCKI);
     uint chan  = pwm_gpio_to_channel(PIN_SCKI);
-    pwm_set_clkdiv_int_frac(slice, 1, 0);  // full sys clock speed
-    pwm_set_wrap(slice, 19);               // period = 20 clocks → 250 MHz/20 = 12.5 MHz
-    pwm_set_chan_level(slice, chan, 10);    // 50% duty cycle
+    pwm_set_clkdiv_int_frac(slice, 1, 0);
+    pwm_set_wrap(slice, 19);               // period = 20 clocks
+    pwm_set_chan_level(slice, chan, (19 + 1) / 2);  // 50 % duty
     pwm_set_enabled(slice, true);
 }
 
@@ -128,7 +130,7 @@ static void params_init()
 // =============================================================================
 void setup()
 {
-    // Set system clock to 98.304 MHz for exact 48 kHz I2S and 12.288 MHz SCKI
+    // Overclock to 250 MHz – ~2.5× DSP headroom; SCKI PWM and I2S configured accordingly
     set_sys_clock_khz(SYS_CLK_KHZ, true);
 
     // SCKI for PCM1808 (must start before I2S)
@@ -267,17 +269,21 @@ static inline float process_sample(float in)
 // ── Re-apply parameters when Core 0 signals a change ─────────────────────────
 static void apply_param_updates()
 {
+    // Clear flag BEFORE applying – if Core 0 sets it again mid-apply we catch
+    // it on the very next call rather than silently discarding the update.
     if (g_dist.needs_update) {
+        g_dist.needs_update = false;
+        __sync_synchronize();
         IFX_Distortion_SetGain(&dsp_dist, g_dist.gain);
         IFX_Distortion_SetHPF (&dsp_dist, g_dist.hpf_freq);
         IFX_Distortion_SetLPF (&dsp_dist, g_dist.tone_freq, g_dist.tone_damp);
-        g_dist.needs_update = false;
     }
 
     if (g_chorus.needs_update) {
-        // Rebuild chorus – changing delay length or rate requires full reinit
+        g_chorus.needs_update = false;
+        __sync_synchronize();
         float rateB  = g_chorus.rate  * (CHO_RATE_B_DEFAULT / CHO_RATE_A_DEFAULT);
-        float delayB = g_chorus.delay_ms + 2.0f;  // voice B offset kept constant
+        float delayB = g_chorus.delay_ms + 2.0f;
         IFX_Chorus_Init(&dsp_chorus,
                         g_chorus.delay_ms, delayB,
                         g_chorus.depth,    g_chorus.depth * 0.85f,
@@ -285,15 +291,15 @@ static void apply_param_updates()
                         g_chorus.rate,  rateB,
                         g_chorus.mix,
                         SAMPLE_RATE);
-        g_chorus.needs_update = false;
     }
 
     if (g_eq.needs_update) {
+        g_eq.needs_update = false;
+        __sync_synchronize();
         IFX_EQ_SetBass  (&dsp_eq, db_to_linear(g_eq.bass_db));
         IFX_EQ_SetMid   (&dsp_eq, db_to_linear(g_eq.mid_db),
                           g_eq.mid_freq, g_eq.mid_bw);
         IFX_EQ_SetTreble(&dsp_eq, db_to_linear(g_eq.treb_db));
-        g_eq.needs_update = false;
     }
 }
 
@@ -320,9 +326,11 @@ void loop1()
 
         float out = process_sample(mono);
 
-        // Write to both channels (stereo output from mono source)
-        tx_buf[i * 2    ] = (int32_t)(out * 2147483647.0f);
-        tx_buf[i * 2 + 1] = (int32_t)(out * 2147483647.0f);
+        // Clamp before conversion: float rounding at ±1.0f can overflow INT32
+        out = clampf(out, -1.0f, 1.0f);
+        int32_t pcm = (int32_t)(out * 2147483647.0f);
+        tx_buf[i * 2    ] = pcm;
+        tx_buf[i * 2 + 1] = pcm;
     }
 
     // ── Write processed buffer to PCM5102A ────────────────────────────

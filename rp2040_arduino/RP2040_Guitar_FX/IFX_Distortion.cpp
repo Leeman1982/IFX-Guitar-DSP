@@ -93,6 +93,7 @@ void IFX_Distortion_Init(IFX_Distortion *d, float fs,
     d->hpfInpBufIn[0]  = 0.0f; d->hpfInpBufIn[1]  = 0.0f;
     d->hpfInpBufOut[0] = 0.0f; d->hpfInpBufOut[1] = 0.0f;
     d->hpfInpWcT       = 2.0f * M_PI * hpfHz * d->T;
+    if (d->hpfInpWcT > 2.0f) d->hpfInpWcT = 2.0f;
     d->hpfInpOut       = 0.0f;
 
     // Clipper
@@ -116,6 +117,7 @@ void IFX_Distortion_SetGain(IFX_Distortion *d, float gain)
 void IFX_Distortion_SetHPF(IFX_Distortion *d, float hpfHz)
 {
     d->hpfInpWcT = 2.0f * M_PI * hpfHz * d->T;
+    if (d->hpfInpWcT > 2.0f) d->hpfInpWcT = 2.0f;  // bilinear HPF unstable above wcT=2
 }
 
 void IFX_Distortion_SetLPF(IFX_Distortion *d, float lpfHz, float damp)

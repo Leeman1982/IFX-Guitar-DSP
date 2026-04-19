@@ -2,10 +2,9 @@
 #include <stdio.h>
 #include <string.h>
 
-// Cast away volatile for float pointer storage in Param table.
-// Writes still go through the volatile members directly; we only store the
-// address so we can read back the current value for display.
-#define VP(x)  const_cast<float*>(const_cast<volatile float*>(&(x)))
+// Param.value is volatile float* – no cast needed; taking the address of a
+// volatile member gives volatile float* directly, which the compiler treats
+// correctly on both cores (no register caching, correct read/write ordering).
 
 LCDMenu::LCDMenu(uint8_t i2c_addr, uint8_t cols, uint8_t rows)
     : _lcd(i2c_addr, cols, rows),
@@ -25,24 +24,24 @@ void LCDMenu::begin()
 void LCDMenu::buildParamTables()
 {
     // DISTORTION – 5 parameters
-    _distParams[0] = { "DRIVE",    VP(g_dist.gain),       1.0f,   500.0f,  5.0f,  false, false, true  };
-    _distParams[1] = { "HPF",      VP(g_dist.hpf_freq),   80.0f,  500.0f,  10.0f, true,  false, false };
-    _distParams[2] = { "TONE",     VP(g_dist.tone_freq),  500.0f, 10000.f, 100.f, true,  false, false };
-    _distParams[3] = { "BODY",     VP(g_dist.tone_damp),  0.5f,   2.0f,    0.1f,  false, false, false };
-    _distParams[4] = { "LEVEL",    VP(g_dist.level),      0.0f,   1.0f,    0.01f, false, false, true  };
+    _distParams[0] = { "DRIVE",    &g_dist.gain,       1.0f,   500.0f,  5.0f,  false, false, true  };
+    _distParams[1] = { "HPF",      &g_dist.hpf_freq,   80.0f,  500.0f,  10.0f, true,  false, false };
+    _distParams[2] = { "TONE",     &g_dist.tone_freq,  500.0f, 10000.f, 100.f, true,  false, false };
+    _distParams[3] = { "BODY",     &g_dist.tone_damp,  0.5f,   2.0f,    0.1f,  false, false, false };
+    _distParams[4] = { "LEVEL",    &g_dist.level,      0.0f,   1.0f,    0.01f, false, false, true  };
 
     // CHORUS – 4 parameters
-    _chorusParams[0] = { "RATE",   VP(g_chorus.rate),     0.1f,   8.0f,    0.1f,  false, false, false };
-    _chorusParams[1] = { "DEPTH",  VP(g_chorus.depth),    5.0f,   80.0f,   1.0f,  false, false, false };
-    _chorusParams[2] = { "MIX",    VP(g_chorus.mix),      0.0f,   1.0f,    0.01f, false, false, true  };
-    _chorusParams[3] = { "DELAY",  VP(g_chorus.delay_ms), 5.0f,   30.0f,   0.5f,  false, false, false };
+    _chorusParams[0] = { "RATE",   &g_chorus.rate,     0.1f,   8.0f,    0.1f,  false, false, false };
+    _chorusParams[1] = { "DEPTH",  &g_chorus.depth,    5.0f,   80.0f,   1.0f,  false, false, false };
+    _chorusParams[2] = { "MIX",    &g_chorus.mix,      0.0f,   1.0f,    0.01f, false, false, true  };
+    _chorusParams[3] = { "DELAY",  &g_chorus.delay_ms, 5.0f,   30.0f,   0.5f,  false, false, false };
 
     // EQ – 5 parameters
-    _eqParams[0] = { "BASS",    VP(g_eq.bass_db),    -12.0f,  12.0f,  0.5f,  false, true,  false };
-    _eqParams[1] = { "MID",     VP(g_eq.mid_db),     -12.0f,  12.0f,  0.5f,  false, true,  false };
-    _eqParams[2] = { "TREBLE",  VP(g_eq.treb_db),    -12.0f,  12.0f,  0.5f,  false, true,  false };
-    _eqParams[3] = { "MID FRQ", VP(g_eq.mid_freq),   200.0f, 5000.f, 50.0f, true,  false, false };
-    _eqParams[4] = { "MID BW",  VP(g_eq.mid_bw),     100.0f, 2000.f, 25.0f, true,  false, false };
+    _eqParams[0] = { "BASS",    &g_eq.bass_db,    -12.0f,  12.0f,  0.5f,  false, true,  false };
+    _eqParams[1] = { "MID",     &g_eq.mid_db,     -12.0f,  12.0f,  0.5f,  false, true,  false };
+    _eqParams[2] = { "TREBLE",  &g_eq.treb_db,    -12.0f,  12.0f,  0.5f,  false, true,  false };
+    _eqParams[3] = { "MID FRQ", &g_eq.mid_freq,   200.0f, 5000.f, 50.0f, true,  false, false };
+    _eqParams[4] = { "MID BW",  &g_eq.mid_bw,     100.0f, 2000.f, 25.0f, true,  false, false };
 }
 
 // ── Main update called from Core 0 loop ──────────────────────────────────────
@@ -87,6 +86,7 @@ void LCDMenu::update(int8_t encDelta, bool encPressed, bool forceRedraw)
     case MS_DIST_PARAM:
         if (encDelta != 0) {
             applyDelta(_distParams[_paramIdx], encDelta);
+            __sync_synchronize();           // ensure value write reaches Core 1 before flag
             g_dist.needs_update = true;
             _dirty = true;
         }
@@ -105,6 +105,7 @@ void LCDMenu::update(int8_t encDelta, bool encPressed, bool forceRedraw)
     case MS_CHORUS_PARAM:
         if (encDelta != 0) {
             applyDelta(_chorusParams[_paramIdx], encDelta);
+            __sync_synchronize();
             g_chorus.needs_update = true;
             _dirty = true;
         }
@@ -123,6 +124,7 @@ void LCDMenu::update(int8_t encDelta, bool encPressed, bool forceRedraw)
     case MS_EQ_PARAM:
         if (encDelta != 0) {
             applyDelta(_eqParams[_paramIdx], encDelta);
+            __sync_synchronize();
             g_eq.needs_update = true;
             _dirty = true;
         }

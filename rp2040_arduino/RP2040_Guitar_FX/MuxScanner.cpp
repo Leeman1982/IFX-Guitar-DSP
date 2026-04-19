@@ -93,11 +93,12 @@ bool MuxScanner::scan()
     selectChannel(MUX_CH_ENC_B);
     bool encB = (digitalRead(PIN_MUX_SIG) == HIGH);
 
-    uint8_t newState = ((encA ? 1 : 0) << 1) | (encB ? 1 : 0);
-    uint8_t idx      = (_encState << 2) | newState;
-    int8_t  step     = ENC_TABLE[idx & 0x0F];
+    uint8_t newState = ((encA ? 1u : 0u) << 1) | (encB ? 1u : 0u);
+    _encState &= 0x03u;                                 // enforce 2-bit state
+    uint8_t idx = (uint8_t)((_encState << 2) | newState) & 0x0Fu;
+    int8_t  step = ENC_TABLE[idx];
     if (step != 0) { _encDelta += step; changed = true; }
-    _encState = newState;
+    _encState = newState & 0x03u;
 
     // ── CH5: Encoder push button ─────────────────────────────────────────
     selectChannel(MUX_CH_ENC_SW);

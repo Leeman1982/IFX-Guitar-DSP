@@ -28,14 +28,14 @@ enum MenuState {
 
 // Parameter descriptor – one per editable field
 struct Param {
-    const char *label;     // up to 8 chars
-    float      *value;     // pointer into the volatile param struct (safe – aligned float)
-    float       minVal;
-    float       maxVal;
-    float       step;
-    bool        isFreq;    // display as Hz/kHz instead of raw value
-    bool        isDb;      // display with dB suffix
-    bool        isPct;     // display as 0-100%
+    const char     *label;       // up to 8 chars
+    volatile float *value;       // direct pointer into g_dist/g_chorus/g_eq – keeps volatile
+    float           minVal;
+    float           maxVal;
+    float           step;
+    bool            isFreq;      // display as Hz/kHz
+    bool            isDb;        // display with dB suffix
+    bool            isPct;       // display as 0-100%
 };
 
 class LCDMenu {
