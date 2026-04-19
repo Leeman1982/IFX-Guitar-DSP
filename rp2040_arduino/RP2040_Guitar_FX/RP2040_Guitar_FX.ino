@@ -25,7 +25,7 @@
 // Board package
 //   • Raspberry Pi Pico / RP2040  (Earle Philhower port)
 //   Board: "Raspberry Pi Pico Zero"  or  "Raspberry Pi Pico"
-//   CPU speed: 98.304 MHz  (custom – see note in config.h)
+//   CPU speed: 250 MHz  (overclocked – set_sys_clock_khz, see config.h)
 //
 // Flashing
 //   Hold BOOTSEL, plug USB, drag-and-drop UF2  OR  use Arduino IDE → Upload.
@@ -89,8 +89,8 @@ static void scki_pwm_init()
     uint slice = pwm_gpio_to_slice_num(PIN_SCKI);
     uint chan  = pwm_gpio_to_channel(PIN_SCKI);
     pwm_set_clkdiv_int_frac(slice, 1, 0);  // full sys clock speed
-    pwm_set_wrap(slice, 7);                // period = 8 clocks
-    pwm_set_chan_level(slice, chan, 4);     // 50% duty cycle
+    pwm_set_wrap(slice, 19);               // period = 20 clocks → 250 MHz/20 = 12.5 MHz
+    pwm_set_chan_level(slice, chan, 10);    // 50% duty cycle
     pwm_set_enabled(slice, true);
 }
 
