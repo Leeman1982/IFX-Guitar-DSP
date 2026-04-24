@@ -81,9 +81,12 @@ static inline void i2s_out_program_init(PIO pio, uint sm, uint offset,
     /* Join TX FIFO for deeper buffer */
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
-    /* Clock divider: BCK = sample_rate * 64, PIO = 2 * BCK */
+    /* Clock divider: the output PIO program takes 130 cycles per stereo frame
+     * (65 per channel: 1 set-x + 31×2 loop + 2 last-bit = 65) rather than 128.
+     * Using target = 48000 × 65 × 2 makes LRCK exactly 48 000 Hz, keeping
+     * BCK rising edges at 32 per LRCK half (= 3 072 000 Hz) as required. */
     float sys_clk = (float)clock_get_hz(clk_sys);
-    float target = 48000.0f * 64.0f * 2.0f;
+    float target  = 48000.0f * 65.0f * 2.0f;
     sm_config_set_clkdiv(&c, sys_clk / target);
 
     pio_sm_init(pio, sm, offset, &c);

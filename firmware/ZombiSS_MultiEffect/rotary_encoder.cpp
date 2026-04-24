@@ -1,56 +1,77 @@
 #include "rotary_encoder.h"
 #include <Arduino.h>
 
+/* ---- MUX helpers ------------------------------------------------ */
+
+static inline void mux_select(uint8_t ch) {
+    digitalWrite(MUX_S0_PIN, (ch >> 0) & 1);
+    digitalWrite(MUX_S1_PIN, (ch >> 1) & 1);
+    digitalWrite(MUX_S2_PIN, (ch >> 2) & 1);
+    digitalWrite(MUX_S3_PIN, (ch >> 3) & 1);
+}
+
+bool RotaryEncoder::readMuxChannel(uint8_t ch) {
+    mux_select(ch);
+    delayMicroseconds(2);                      /* 74HC4067 max prop: ~540 ns at 2V, faster at 3.3V */
+    return digitalRead(MUX_SIG_PIN) == LOW;   /* Active LOW: button pressed = LOW */
+}
+
+/* ---- Initialisation --------------------------------------------- */
+
+void RotaryEncoder::init() {
+    position     = 0;
+    evtHead      = 0;
+    evtTail      = 0;
+    swPressStart = 0;
+    swLongFired  = false;
+
+    /* Encoder A/B — quadrature needs fast direct reads */
+    pinMode(ENCODER_PIN_A, INPUT_PULLUP);
+    pinMode(ENCODER_PIN_B, INPUT_PULLUP);
+    lastAB = ((digitalRead(ENCODER_PIN_A) ? 1 : 0) << 1) |
+              (digitalRead(ENCODER_PIN_B) ? 1 : 0);
+
+    /* MUX select pins */
+    pinMode(MUX_S0_PIN, OUTPUT);
+    pinMode(MUX_S1_PIN, OUTPUT);
+    pinMode(MUX_S2_PIN, OUTPUT);
+    pinMode(MUX_S3_PIN, OUTPUT);
+    mux_select(0);
+
+    /* MUX signal — pull-up so unpressed = HIGH */
+    pinMode(MUX_SIG_PIN, INPUT_PULLUP);
+
+    /* Initialise all button state as not-pressed */
+    uint32_t now = millis();
+    for (uint8_t i = 0; i < 8; i++) {
+        muxState[i]      = false;
+        muxLastChange[i] = now;
+    }
+}
+
+/* ---- Event queue ------------------------------------------------- */
+
 void RotaryEncoder::pushEvent(EncoderEvent evt) {
     uint8_t next = (evtHead + 1) & 0x0F;
-    if (next != evtTail) {
+    if (next != evtTail) {        /* drop if full */
         events[evtHead] = evt;
         evtHead = next;
     }
 }
 
-void RotaryEncoder::init() {
-    position = 0;
-    evtHead = 0;
-    evtTail = 0;
-    swPressed = false;
-    swLongDetected = false;
-    swPressStart = 0;
-
-    pinMode(ENCODER_PIN_A, INPUT_PULLUP);
-    pinMode(ENCODER_PIN_B, INPUT_PULLUP);
-    pinMode(ENCODER_PIN_SW, INPUT_PULLUP);
-
-    lastAB = (digitalRead(ENCODER_PIN_A) << 1) | digitalRead(ENCODER_PIN_B);
-    swLastTime = millis();
-
-    const uint8_t fxPins[] = {SWITCH_FX1_PIN, SWITCH_FX2_PIN, SWITCH_FX3_PIN,
-                               SWITCH_FX4_PIN, SWITCH_FX5_PIN};
-    for (int i = 0; i < 5; i++) {
-        pinMode(fxPins[i], INPUT_PULLUP);
-        fxLastTime[i] = 0;
-        fxLastState[i] = true;
-    }
-
-    pinMode(SWITCH_BACK_PIN, INPUT_PULLUP);
-    backLastTime = 0;
-    backLastState = true;
-
-    pinMode(SWITCH_CONFIRM_PIN, INPUT_PULLUP);
-    confirmLastTime = 0;
-    confirmLastState = true;
-}
+/* ---- Polling ----------------------------------------------------- */
 
 void RotaryEncoder::poll() {
     uint32_t now = millis();
 
-    /* Quadrature decoding */
-    uint8_t a = digitalRead(ENCODER_PIN_A) ? 1 : 0;
-    uint8_t b = digitalRead(ENCODER_PIN_B) ? 1 : 0;
+    /* --- Quadrature decoding (EC11 A/B direct GPIO) --- */
+    uint8_t a  = digitalRead(ENCODER_PIN_A) ? 1 : 0;
+    uint8_t b  = digitalRead(ENCODER_PIN_B) ? 1 : 0;
     uint8_t ab = (a << 1) | b;
 
     if (ab != lastAB) {
-        static const int8_t encTable[] = {
+        /* Gray-code transition table: [prev_AB << 2 | cur_AB] → delta */
+        static const int8_t encTable[16] = {
              0, +1, -1,  0,
             -1,  0,  0, +1,
             +1,  0,  0, -1,
@@ -58,59 +79,50 @@ void RotaryEncoder::poll() {
         };
         int8_t delta = encTable[(lastAB << 2) | ab];
         position += delta;
-        if (delta > 0)      pushEvent(ENC_EVENT_CW);
+        if      (delta > 0) pushEvent(ENC_EVENT_CW);
         else if (delta < 0) pushEvent(ENC_EVENT_CCW);
         lastAB = ab;
     }
 
-    /* Encoder push button */
-    bool swNow = !digitalRead(ENCODER_PIN_SW);
-    if (swNow != swPressed && (now - swLastTime) > DEBOUNCE_MS) {
-        swLastTime = now;
-        swPressed = swNow;
-        if (swNow) {
-            swPressStart = now;
-            swLongDetected = false;
+    /* --- MUX button scanning (all 8 channels) --- */
+    for (uint8_t ch = 0; ch < 8; ch++) {
+        bool raw  = readMuxChannel(ch);
+        bool prev = muxState[ch];
+
+        /* Debounce: ignore transitions shorter than DEBOUNCE_MS */
+        if (raw == prev) continue;
+        if ((now - muxLastChange[ch]) < DEBOUNCE_MS) continue;
+
+        /* State has changed and held past debounce window — accept it */
+        muxLastChange[ch] = now;
+        muxState[ch]      = raw;
+
+        if (raw) {
+            /* --- Press edge --- */
+            if      (ch <= 4) pushEvent((EncoderEvent)((uint8_t)ENC_EVENT_FX1_TOGGLE + ch));
+            else if (ch == MUX_CH_BACK)    pushEvent(ENC_EVENT_BACK);
+            else if (ch == MUX_CH_CONFIRM) pushEvent(ENC_EVENT_CONFIRM);
+            else if (ch == MUX_CH_ENC_SW) {
+                swPressStart = now;
+                swLongFired  = false;
+            }
         } else {
-            if (!swLongDetected) pushEvent(ENC_EVENT_PRESS);
+            /* --- Release edge --- */
+            if (ch == MUX_CH_ENC_SW && !swLongFired) {
+                pushEvent(ENC_EVENT_PRESS);   /* Short press on release */
+            }
         }
     }
-    if (swPressed && !swLongDetected && (now - swPressStart) > LONG_PRESS_MS) {
-        swLongDetected = true;
+
+    /* Long-press detection for encoder SW (checked every poll tick) */
+    if (muxState[MUX_CH_ENC_SW] && !swLongFired &&
+        (now - swPressStart) >= LONG_PRESS_MS) {
+        swLongFired = true;
         pushEvent(ENC_EVENT_LONG_PRESS);
     }
-
-    /* FX momentary switches */
-    const uint8_t fxPins[] = {SWITCH_FX1_PIN, SWITCH_FX2_PIN, SWITCH_FX3_PIN,
-                               SWITCH_FX4_PIN, SWITCH_FX5_PIN};
-    const EncoderEvent fxEvents[] = {ENC_EVENT_FX1_TOGGLE, ENC_EVENT_FX2_TOGGLE,
-                                      ENC_EVENT_FX3_TOGGLE, ENC_EVENT_FX4_TOGGLE,
-                                      ENC_EVENT_FX5_TOGGLE};
-    for (int i = 0; i < 5; i++) {
-        bool state = !digitalRead(fxPins[i]);
-        if (state != fxLastState[i] && (now - fxLastTime[i]) > DEBOUNCE_MS) {
-            fxLastTime[i] = now;
-            fxLastState[i] = state;
-            if (state) pushEvent(fxEvents[i]);
-        }
-    }
-
-    /* Back button */
-    bool backNow = !digitalRead(SWITCH_BACK_PIN);
-    if (backNow != backLastState && (now - backLastTime) > DEBOUNCE_MS) {
-        backLastTime = now;
-        backLastState = backNow;
-        if (backNow) pushEvent(ENC_EVENT_BACK);
-    }
-
-    /* Confirm button */
-    bool confirmNow = !digitalRead(SWITCH_CONFIRM_PIN);
-    if (confirmNow != confirmLastState && (now - confirmLastTime) > DEBOUNCE_MS) {
-        confirmLastTime = now;
-        confirmLastState = confirmNow;
-        if (confirmNow) pushEvent(ENC_EVENT_CONFIRM);
-    }
 }
+
+/* ---- Public accessors -------------------------------------------- */
 
 EncoderEvent RotaryEncoder::getEvent() {
     if (evtHead == evtTail) return ENC_EVENT_NONE;

@@ -4,6 +4,7 @@
 /*
  * ZOMBI SS Multi-Effect DSP Unit
  * Hardware Configuration for RP2350 (Arduino-Pico)
+ * MUX Edition — buttons routed via CD74HC4067 16-ch multiplexer
  */
 
 /* ===== Audio Config ===== */
@@ -12,47 +13,72 @@
 #define AUDIO_BUFFER_FRAMES   64    /* Per half-buffer (~1.33ms) */
 #define AUDIO_BUFFER_TOTAL    (AUDIO_BUFFER_FRAMES * 2) /* Stereo L+R */
 
-/* ===== I2S Output - PCM5102 DAC ===== */
+/* ===== I2S Output — PCM5102 DAC ===== */
 #define I2S_OUT_DIN_PIN       16
-#define I2S_OUT_BCK_PIN       17    /* BCK=17, LRCK=18 (consecutive) */
+#define I2S_OUT_BCK_PIN       17    /* BCK=17, LRCK=18 (must be consecutive) */
 #define I2S_OUT_LRCK_PIN      18
 
-/* ===== I2S Input - PCM1808 ADC ===== */
+/* ===== I2S Input — PCM1808 ADC ===== */
 /* DOUT, LRCK, BCK must be consecutive for PIO in-base mapping */
 #define I2S_IN_DOUT_PIN       19
 #define I2S_IN_LRCK_PIN       20
 #define I2S_IN_BCK_PIN        21
 
-/* ===== I2C OLED Display (SH1106 128x64) ===== */
+/* ===== PCM1808 ADC Control ===== */
+#define PCM1808_SCKI_PIN      22    /* PWM output: 12.5 MHz master clock */
+
+/* ===== PCM5102 DAC Control ===== */
+#define PCM5102_XSMT_PIN      0     /* GP0 → XSMT: HIGH = unmuted */
+/*
+ * PCM5102 module wiring:
+ *   XSMT → GP0  (driven HIGH by firmware)
+ *   FMT  → 3V3  (HIGH = Left-Justified mode; matches PIO output bit alignment)
+ *   SCK  → GND  (no-SCK auto-detect mode)
+ *   BCK  → GP17, DIN → GP16, LRCK → GP18
+ */
+
+/* ===== I2C OLED Display (SSD1306 128×64) ===== */
 #define OLED_SDA_PIN          4
 #define OLED_SCL_PIN          5
 #define OLED_I2C_ADDR         0x3C
 #define OLED_I2C_FREQ         400000
 
-/* ===== Rotary Encoder (EC11 on Estardyn module) ===== */
+/* ===== Rotary Encoder — EC11 (direct GPIO, needs fast quadrature read) ===== */
 #define ENCODER_PIN_A         10
 #define ENCODER_PIN_B         11
-#define ENCODER_PIN_SW        12
+/* Encoder push-button is on MUX CH7 — see below */
 
-/* ===== Module Buttons ===== */
-#define SWITCH_BACK_PIN       14
-#define SWITCH_CONFIRM_PIN    15
+/* ===== Multiplexer — CD74HC4067 (16-channel) ===== */
+/*
+ * Wiring:
+ *   EN  → GND    (always enabled)
+ *   S0  → GP2
+ *   S1  → GP3
+ *   S2  → GP6
+ *   S3  → GP7
+ *   SIG → GP8    (RP2350 internal pull-up enabled; button pressed = SIG pulled LOW)
+ *
+ * Each button: one leg to the MUX channel pin, other leg to GND.
+ * Channel assignments (0–7 used; 8–15 spare):
+ */
+#define MUX_S0_PIN            2
+#define MUX_S1_PIN            3
+#define MUX_S2_PIN            6
+#define MUX_S3_PIN            7
+#define MUX_SIG_PIN           8
 
-/* ===== Effect Bypass Momentary Switches ===== */
-#define SWITCH_FX1_PIN        6     /* TS Boost   (FX_TSBOOST)   */
-#define SWITCH_FX2_PIN        7     /* Noise Gate (FX_NOISEGATE) */
-#define SWITCH_FX3_PIN        8     /* Overdrive  (FX_OVERDRIVE) */
-#define SWITCH_FX4_PIN        9     /* 10-Band EQ (FX_EQ)        */
-#define SWITCH_FX5_PIN        13    /* Chorus     (FX_CHORUS)    */
-/* FX_DELAY has no dedicated footswitch — toggle via OLED menu   */
+#define MUX_CH_FX1            0    /* TS Boost toggle   */
+#define MUX_CH_FX2            1    /* Noise Gate toggle */
+#define MUX_CH_FX3            2    /* Overdrive toggle  */
+#define MUX_CH_FX4            3    /* EQ toggle         */
+#define MUX_CH_FX5            4    /* Chorus toggle     */
+#define MUX_CH_BACK           5    /* Nav: back         */
+#define MUX_CH_CONFIRM        6    /* Nav: confirm      */
+#define MUX_CH_ENC_SW         7    /* Encoder push      */
 
-/* ===== PCM5102 DAC Control ===== */
-#define PCM5102_XSMT_PIN      0     /* GP0 → XSMT: drive HIGH to unmute analog output */
-/* Note: FMT pin tie to GND (I2S standard), SCK tie to GND (no SCK mode) on your module */
-
-/* ===== Debounce ===== */
-#define DEBOUNCE_MS           5
-#define LONG_PRESS_MS         500
+/* ===== Timing ===== */
+#define DEBOUNCE_MS           15   /* Button debounce window (ms) */
+#define LONG_PRESS_MS         500  /* Encoder long-press threshold (ms) */
 
 /* ===== System Clock ===== */
 #define SYS_CLOCK_KHZ         150000
