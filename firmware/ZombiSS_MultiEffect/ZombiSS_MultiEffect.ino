@@ -62,15 +62,40 @@ static UISystem      g_ui;
  */
 static void audio_process_callback(const int32_t *input, int32_t *output,
                                     uint32_t frame_count) {
-    for (uint32_t i = 0; i < frame_count; i++) {
-        int32_t raw = input[i * 2];
-        float   inp = (float)((raw << 1) >> 8) / 8388608.0f;
+    /* Master-volume smoother: ramps at 0.002/sample (~500 samples = ~10 ms full-scale).
+     * Prevents audible clicks when the user adjusts master volume mid-signal.
+     * Lives here (Core 0 only) so it needs no cross-core synchronisation. */
+    static float smooth_vol = 0.8f;
 
-        float   out = EffectChain_Process(&g_fx_chain, inp);
+    for (uint32_t i = 0; i < frame_count; i++) {
+        /* Snap smooth_vol toward the current target.
+         * masterVolume is a 4-byte aligned float; single-word reads are atomic
+         * on ARM Cortex-M33, so no lock is needed for this scalar read. */
+        float target = g_fx_chain.masterVolume;
+        if      (smooth_vol < target - 0.002f) smooth_vol += 0.002f;
+        else if (smooth_vol > target + 0.002f) smooth_vol -= 0.002f;
+        else                                    smooth_vol  = target;
+
+        /* PCM1808 I2S word: [delay_bit | B23..B0 | 7 zeros]
+         *   bit31 = 0  (PCM1808 Philips 1-clock delay)
+         *   bits30..7  = audio bits B23..B0
+         *   bits6..0   = zero padding
+         *
+         * (uint32_t) cast makes the left-shift defined; the subsequent cast
+         * to int32_t and arithmetic >>8 are implementation-defined under C99
+         * but are always arithmetic-right-shift on every ARM/GCC/Clang target.
+         * This is the standard idiom in embedded audio DSP. */
+        int32_t raw  = input[i * 2];
+        float   inp  = (float)((int32_t)((uint32_t)raw << 1) >> 8) / 8388608.0f;
+
+        /* Run effect chain — DSP only, master volume NOT applied inside.
+         * Individual aligned float reads from g_fx_chain are atomic on Cortex-M33;
+         * the DMB barrier in SetParam ensures writes from Core 1 are visible here. */
+        float out = EffectChain_Process(&g_fx_chain, inp) * smooth_vol;
+        if (out >  1.0f) out =  1.0f;
+        if (out < -1.0f) out = -1.0f;
 
         int32_t out_i32 = (int32_t)(out * 8388607.0f);
-        if (out_i32 >  8388607) out_i32 =  8388607;
-        if (out_i32 < -8388608) out_i32 = -8388608;
         out_i32 <<= 8;
 
         output[i * 2]     = out_i32;

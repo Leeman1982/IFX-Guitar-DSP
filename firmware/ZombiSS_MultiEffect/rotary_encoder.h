@@ -21,13 +21,14 @@ typedef enum {
 } EncoderEvent;
 
 /*
- * Handles EC11 rotary encoder (A/B quadrature on direct GPIO) plus
- * all 8 buttons routed through the CD74HC4067 MUX:
- *   CH0-4 = FX1-5 footswitches
- *   CH5   = BACK nav button
- *   CH6   = CONFIRM nav button
- *   CH7   = encoder push (with long-press detection)
- * All events are queued and read via getEvent().
+ * EC11 rotary encoder + CD74HC4067 MUX button scanner.
+ *
+ * A/B quadrature: decoded in a GPIO interrupt service routine (fires on
+ * CHANGE of either pin) for zero-latency edge capture, then consumed by
+ * poll() which generates CW/CCW events.
+ *
+ * Buttons (CH0-7 on MUX): polled at the UI refresh rate in poll().
+ * All events share the same 16-entry ring queue; read with getEvent().
  */
 class RotaryEncoder {
 public:
@@ -35,20 +36,21 @@ public:
     void poll();
     EncoderEvent getEvent();
     bool hasEvent();
-    int32_t getPosition();
+    int32_t getPosition();   /* absolute step count from ISR */
 
 private:
     void pushEvent(EncoderEvent evt);
     bool readMuxChannel(uint8_t ch);
 
-    int32_t position;
-    uint8_t lastAB;
+    /* Tracks the last position that has been converted to events.
+     * The absolute position counter lives in the file-scope ISR state. */
+    int32_t dispatchedPos;
 
-    /* MUX button debounce state — one entry per channel (CH0..CH7) */
-    bool     muxState[8];       /* debounced: true = pressed          */
-    uint32_t muxLastChange[8];  /* millis() when state last changed   */
+    /* MUX button debounce — one entry per channel (CH0..CH7) */
+    bool     muxState[8];
+    uint32_t muxLastChange[8];
 
-    /* Encoder push long-press tracking */
+    /* Encoder SW long-press tracking */
     uint32_t swPressStart;
     bool     swLongFired;
 

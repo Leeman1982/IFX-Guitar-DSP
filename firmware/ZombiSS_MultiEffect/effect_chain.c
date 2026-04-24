@@ -1,4 +1,8 @@
 #include "effect_chain.h"
+/* __dmb() = Data Memory Barrier: ensures all writes before it are globally visible
+ * before any read/write after it. Required for correct cross-core visibility
+ * (Core 1 writes params; Core 0 audio IRQ reads them). */
+#define PARAM_WRITE_BARRIER() __asm volatile ("dmb sy" ::: "memory")
 
 /* Compile-time guard: EQ param count must match the actual number of EQ bands */
 _Static_assert(EQ_PARAM_COUNT == EQ10_BANDS,
@@ -119,6 +123,11 @@ void EffectChain_Init(EffectChain *ec) {
         SAMPLE_RATE_HZ);
 }
 
+
+void EffectChain_ToggleEffect(EffectChain *ec, uint8_t fxIndex) {
+    if (fxIndex < FX_COUNT) ec->active[fxIndex] = !ec->active[fxIndex];
+}
+
 float EffectChain_Process(EffectChain *ec, float inp) {
     float sig = inp;
     if (ec->active[FX_TSBOOST])   sig = IFX_TSBoost_Update(&ec->tsboost, sig);
@@ -127,15 +136,11 @@ float EffectChain_Process(EffectChain *ec, float inp) {
     if (ec->active[FX_EQ])        sig = IFX_10BandEQ_Update(&ec->eq, sig);
     if (ec->active[FX_CHORUS])    sig = IFX_Chorus_Update(&ec->chorus, sig);
     if (ec->active[FX_DELAY])     sig = IFX_Delay_Update(&ec->delay, sig);
-
-    sig *= ec->masterVolume;
+    /* Master volume is NOT applied here — the audio callback applies a
+     * smoothed version to prevent clicks on large rapid changes. */
     if (sig >  1.0f) sig =  1.0f;
     if (sig < -1.0f) sig = -1.0f;
     return sig;
-}
-
-void EffectChain_ToggleEffect(EffectChain *ec, uint8_t fxIndex) {
-    if (fxIndex < FX_COUNT) ec->active[fxIndex] = !ec->active[fxIndex];
 }
 
 void EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, float value) {
@@ -211,10 +216,19 @@ void EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, 
         case DL_FEEDBACK: IFX_Delay_SetFeedback(&ec->delay, value); break;
         } break;
     }
+    PARAM_WRITE_BARRIER();
 }
 
 void EffectChain_SetMasterVolume(EffectChain *ec, float vol) {
     if (vol < 0.0f) vol = 0.0f;
     if (vol > 1.0f) vol = 1.0f;
     ec->masterVolume = vol;
+    PARAM_WRITE_BARRIER();
+}
+
+void EffectChain_ToggleEffect(EffectChain *ec, uint8_t fxIndex) {
+    if (fxIndex < FX_COUNT) {
+        ec->active[fxIndex] = !ec->active[fxIndex];
+        PARAM_WRITE_BARRIER();
+    }
 }
