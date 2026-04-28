@@ -9,7 +9,7 @@
  *
  * Audio I/O:
  *   Input:  PCM1808 ADC via PIO1 I2S (SCKI on GP22 via PWM)
- *   Output: PCM5102 DAC via PIO0 I2S (XSMT on GP0, FMT tied HIGH = LJ mode)
+ *   Output: PCM5102A DAC via PIO0 I2S (SD/XSMT on GP0; FMT=GND internal = I2S Philips)
  *
  * Effects Chain:
  *   1. TS Boost   2. Noise Gate   3. Overdrive
@@ -55,10 +55,11 @@ static UISystem      g_ui;
  *   Bits 6–0:  zero padding
  * Conversion: (raw << 1) >> 8  →  sign-extended 24-bit int / 2^23  →  float.
  *
- * I2S output word layout (PCM5102, Left-Justified, FMT=HIGH):
- *   Bits 31–8: B23..B0 (left-justified 24-bit signed audio)
- *   Bits 7–0:  zero padding
- * Conversion: float * 2^23, clamp, << 8  →  left-justified 32-bit word.
+ * I2S output word layout (PCM5102A module, I2S Philips, FMT=GND):
+ *   Bit 31:    delay bit (0 — I2S Philips 1-clock delay; PCM5102A ignores it)
+ *   Bits 30–7: B23..B0 (24-bit signed audio, MSB first)
+ *   Bits 6–0:  zero padding
+ * Conversion: float * 2^23 → 24-bit int, mask 24 bits, shift left 7.
  */
 static void audio_process_callback(const int32_t *input, int32_t *output,
                                     uint32_t frame_count) {
@@ -95,8 +96,10 @@ static void audio_process_callback(const int32_t *input, int32_t *output,
         if (out >  1.0f) out =  1.0f;
         if (out < -1.0f) out = -1.0f;
 
-        int32_t out_i32 = (int32_t)(out * 8388607.0f);
-        out_i32 <<= 8;
+        /* I2S Philips word: bit31=0 (delay), bits30-7=B23..B0, bits6-0=0.
+         * Mask strips sign-extension above bit23 before placing into position. */
+        int32_t audio24 = (int32_t)(out * 8388607.0f);
+        int32_t out_i32 = (int32_t)(((uint32_t)audio24 & 0x00FFFFFFu) << 7);
 
         output[i * 2]     = out_i32;
         output[i * 2 + 1] = out_i32;

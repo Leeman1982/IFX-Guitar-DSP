@@ -27,14 +27,19 @@
 /* ===== PCM1808 ADC Control ===== */
 #define PCM1808_SCKI_PIN      22    /* PWM output: 12.5 MHz master clock */
 
-/* ===== PCM5102 DAC Control ===== */
-#define PCM5102_XSMT_PIN      0     /* GP0 → XSMT: HIGH = unmuted */
+/* ===== PCM5102A DAC Control ===== */
+#define PCM5102_XSMT_PIN      0     /* GP0 → SD/XSMT: HIGH = unmuted */
 /*
- * PCM5102 module wiring:
- *   XSMT → GP0  (driven HIGH by firmware)
- *   FMT  → 3V3  (HIGH = Left-Justified mode; matches PIO output bit alignment)
- *   SCK  → GND  (no-SCK auto-detect mode)
- *   BCK  → GP17, DIN → GP16, LRCK → GP18
+ * PCM5102A module pinout (VCC/GND/SD/MC/BCK/DIN/WS):
+ *   SD  → GP0   (soft-mute: driven HIGH by firmware to unmute)
+ *   MC  → leave NC  (module ties SCK to GND internally — no-SCK auto mode)
+ *   BCK → GP17, DIN → GP16, WS → GP18
+ *   FMT is tied GND inside the module → I2S Philips format
+ *     (bit31=delay, bits30-7=B23..B0, bits6-0=padding)
+ *
+ * Bridge wires required — PCM1808 is I2S slave and needs clock from output PIO:
+ *   GP17 → GP21  (BCK  to ADC BCK)
+ *   GP18 → GP20  (LRCK to ADC LRCK)
  */
 
 /* ===== I2C OLED Display (SSD1306 128×64) ===== */
