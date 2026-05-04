@@ -124,10 +124,6 @@ void EffectChain_Init(EffectChain *ec) {
 }
 
 
-void EffectChain_ToggleEffect(EffectChain *ec, uint8_t fxIndex) {
-    if (fxIndex < FX_COUNT) ec->active[fxIndex] = !ec->active[fxIndex];
-}
-
 float EffectChain_Process(EffectChain *ec, float inp) {
     float sig = inp;
     if (ec->active[FX_TSBOOST])   sig = IFX_TSBoost_Update(&ec->tsboost, sig);
