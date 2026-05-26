@@ -1,0 +1,50 @@
+ZOMBI SS Multi-Effect RP2350 - Pin Mapping
+===========================================
+
+I2C0 - OLED Display (SH1106 128x64)
+  GP4  = SDA
+  GP5  = SCL
+
+Momentary FX Bypass Switches (active low, internal pull-up)
+  GP6  = Noise Gate toggle
+  GP7  = Overdrive toggle
+  GP8  = EQ toggle
+  GP9  = Chorus toggle
+  GP13 = Delay toggle
+
+Rotary Encoder (EC11 on Estardyn module)
+  GP10 = Encoder A
+  GP11 = Encoder B
+  GP12 = Encoder push switch (active low)
+
+Module buttons (active low, directly from Estardyn module)
+  GP14 = BACK button
+  GP15 = CONFIRM button
+
+I2S Output - PCM5102 DAC (PIO0)
+  GP16 = DIN  (serial data)
+  GP17 = BCK  (bit clock)
+  GP18 = LRCK (word clock / left-right)
+
+I2S Input - PCM1808 ADC (PIO1)
+  GP19 = DOUT (serial data from ADC)
+  GP20 = LRCK (directly wired from GP18)
+  GP21 = BCK  (directly wired from GP17)
+
+PCM1808 Configuration
+  FMT0 = LOW  (I2S standard)
+  FMT1 = LOW
+  MD0  = LOW  (slave mode - clocks from RP2350)
+  MD1  = HIGH
+
+PCM5102 Configuration
+  FMT = LOW   (I2S standard)
+  DEMP = LOW  (de-emphasis off)
+  XSMT = HIGH (soft mute off)
+  FLT = LOW   (normal latency filter)
+
+System Clock: 150 MHz (overclocked from 125 MHz)
+Audio Sample Rate: 48 kHz
+Audio Bit Depth: 24-bit (in 32-bit I2S frames)
+Buffer Size: 64 frames (double-buffered)
+Processing Latency: ~2.67 ms
