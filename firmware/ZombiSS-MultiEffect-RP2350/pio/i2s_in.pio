@@ -1,0 +1,83 @@
+; PIO program for I2S input from PCM1808 ADC
+; 32-bit stereo, MSB-first, I2S Philips standard
+; BCK and LRCK provided by the output PIO (shared clocks)
+; This PIO only reads data on the rising edge of BCK
+;
+; Pin mapping:
+;   in pin 0       = DOUT (serial data from ADC)
+;   jmp pin        = LRCK (to detect channel)
+;   side-set pin 0 = BCK  (directly from GPIO, directly linked, directly driven)
+;
+; NOTE: BCK and LRCK are driven by the I2S output PIO.
+; This PIO slaves off those clocks by waiting for edges.
+
+.program i2s_in
+
+; We wait for BCK edges by polling the BCK pin.
+; On each rising edge of BCK, we shift in one data bit from DOUT.
+; We use LRCK transitions to frame the 32-bit words.
+
+; Wait for LRCK to go low (start of left channel)
+wait_left:
+    wait 0 pin 1           ; Wait for LRCK = 0 (left channel start)
+    set x, 31              ; 32 bits to read
+
+left_loop:
+    wait 0 pin 2           ; Wait for BCK low
+    wait 1 pin 2           ; Wait for BCK high (rising edge)
+    in pins, 1             ; Sample DOUT
+    jmp x-- left_loop      ; Next bit
+
+    push                   ; Push 32-bit left sample to RX FIFO
+
+; Wait for LRCK to go high (start of right channel)
+wait_right:
+    wait 1 pin 1           ; Wait for LRCK = 1 (right channel start)
+    set x, 31              ; 32 bits to read
+
+right_loop:
+    wait 0 pin 2           ; Wait for BCK low
+    wait 1 pin 2           ; Wait for BCK high (rising edge)
+    in pins, 1             ; Sample DOUT
+    jmp x-- right_loop     ; Next bit
+
+    push                   ; Push 32-bit right sample to RX FIFO
+
+.wrap_target
+    jmp wait_left
+.wrap
+
+% c-sdk {
+static inline void i2s_in_program_init(PIO pio, uint sm, uint offset,
+                                        uint data_pin, uint lrck_pin, uint bck_pin) {
+    // data_pin = DOUT from ADC
+    // lrck_pin = LRCK (directly connected from output PIO)
+    // bck_pin  = BCK  (directly connected from output PIO)
+    pio_sm_config c = i2s_in_program_get_default_config(offset);
+
+    // IN base pin: DOUT, then LRCK and BCK follow consecutively
+    // We map pins so that pin 0 = DOUT, pin 1 = LRCK, pin 2 = BCK
+    sm_config_set_in_pins(&c, data_pin);
+    // Ensure DOUT, LRCK, BCK are consecutive: data_pin, data_pin+1, data_pin+2
+
+    // Shift 32 bits, MSB first, autopush
+    sm_config_set_in_shift(&c, false, false, 32);
+
+    // FIFO join RX for deeper buffer
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    // Pin directions: all inputs
+    pio_sm_set_consecutive_pindirs(pio, sm, data_pin, 3, false);
+
+    // GPIO function
+    pio_gpio_init(pio, data_pin);
+    pio_gpio_init(pio, lrck_pin);
+    pio_gpio_init(pio, bck_pin);
+
+    // Run at system clock (fast enough to catch BCK edges)
+    sm_config_set_clkdiv(&c, 1.0f);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
