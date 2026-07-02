@@ -160,24 +160,36 @@ After upload completes:
 ## Wiring Reference
 
 ### PCM5102 DAC (Output)
-| Pin | GPIO |
-|-----|------|
-| DIN | GP16 |
-| BCK | GP17 |
-| LRCK | GP18 |
-| SCK | GND |
-| XSMT | 3.3V |
-| FMT | GND |
+| Pin | Connect to | Notes |
+|-----|-----------|-------|
+| VIN | 3V3 | board has its own regulator |
+| GND | GND | |
+| DIN | GP16 | serial data |
+| BCK | GP17 | bit clock |
+| LCK/LRCK | GP18 | word select |
+| SCK | GND | selects internal PLL |
+| XSMT | GP0 (or 3.3V) | firmware drives GP0 HIGH = unmuted |
+| FMT | GND | I2S Philips format |
 
-### PCM1808 ADC (Input)
-| Pin | GPIO |
-|-----|------|
-| DOUT | GP19 |
-| LRCK | GP20 (wire from GP18) |
-| BCK | GP21 (wire from GP17) |
-| FMT0/FMT1 | GND |
-| MD0 | GND |
-| MD1 | 3.3V |
+### PCM1808 ADC (Input) — slave mode, RP2350 supplies ALL clocks
+| Pin | Connect to | Notes |
+|-----|-----------|-------|
+| **5V/VCC** | **5V** | **REQUIRED — analog supply. Total silence without it!** |
+| GND | GND | |
+| OUT | GP19 | serial data to RP2350 |
+| **SCKI** | **GP22** | 12.5 MHz master clock from PWM — required |
+| BCK | GP17 | shared with DAC BCK |
+| LRC | GP18 | shared with DAC LRCK |
+| FMT | GND | I2S Philips, 24-bit |
+| MD0 | GND | MD0=MD1=GND → **slave mode** |
+| MD1 | GND | (3.3V here would fight the RP2350's clocks) |
+
+### Bridge wires (required)
+The input PIO reads the clocks on its own pins, so jumper:
+```
+GP17 ──→ GP21   (BCK)
+GP18 ──→ GP20   (LRCK)
+```
 
 ### Estardyn OLED+Encoder Module
 | Pin | GPIO |
@@ -195,11 +207,13 @@ After upload completes:
 ### Effect Bypass Switches (momentary, to GND)
 | Switch | GPIO | Effect |
 |--------|------|--------|
-| SW1 | GP6 | Noise Gate |
-| SW2 | GP7 | Overdrive |
-| SW3 | GP8 | EQ |
-| SW4 | GP9 | Chorus |
-| SW5 | GP13 | Delay |
+| SW1 | GP6 | TS Boost |
+| SW2 | GP7 | Noise Gate |
+| SW3 | GP8 | Overdrive |
+| SW4 | GP9 | 10-Band EQ |
+| SW5 | GP13 | Chorus |
+
+(Delay has no footswitch — toggle it from the OLED menu with CONFIRM.)
 
 ---
 
@@ -255,7 +269,15 @@ ZombiSS_MultiEffect/
 | Compilation fails with RP2350 errors | Update arduino-pico to v4.0.0+ |
 | "No port selected" | Hold BOOTSEL + plug USB, or install drivers |
 | OLED shows nothing | Check I2C: SDA=GP4, SCL=GP5. Try addr 0x3D |
-| No audio | Check XSMT=3.3V on PCM5102, BCK/LRCK shared |
+| No boot tone (first 2 s) | DAC side: XSMT high (GP0=3.3V), DIN/BCK/LCK wiring, FMT=GND |
+| Boot tone OK but no guitar | ADC side: **PCM1808 5V pin connected?** SCKI on GP22? Bridges GP17→GP21, GP18→GP20? MD0=MD1=GND? |
 | Upload fails repeatedly | Hold BOOTSEL, plug USB, try UF2 upload |
-| Crackling audio | Verify BCK wired to both DAC and ADC |
+| Crackling audio | Verify bridge wires are short and solid |
+
+### Scope bring-up checks (if you have a scope/logic analyzer)
+1. GP18 → clean 48.0 kHz square wave (LRCK)
+2. GP17 → ~3.1 MHz bit clock (BCK)
+3. GP22 → 12.5 MHz (SCKI)
+4. GP0 → sits at 3.3 V after boot (XSMT unmuted)
+5. PCM1808 5V pin reads ~5 V with common GND
 | Encoder jumpy | Normal for cheap EC11 - debounce is in firmware |

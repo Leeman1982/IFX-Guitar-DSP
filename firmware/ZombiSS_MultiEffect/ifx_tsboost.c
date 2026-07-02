@@ -1,4 +1,5 @@
 #include "ifx_tsboost.h"
+#include "pico/platform.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -49,7 +50,7 @@ void IFX_TSBoost_SetLevel(IFX_TSBoost *ts, float level) {
     ts->level = level;
 }
 
-float IFX_TSBoost_Update(IFX_TSBoost *ts, float inp) {
+float __not_in_flash_func(IFX_TSBoost_Update)(IFX_TSBoost *ts, float inp) {
     /* 1st-order HPF: y[n] = b0*x[n] + b1*x[n-1] - a1*y[n-1] */
     float hpf_out = ts->hpf_b0 * inp
                   + ts->hpf_b1 * ts->hpf_x1

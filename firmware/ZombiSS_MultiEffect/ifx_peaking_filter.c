@@ -1,4 +1,5 @@
 #include "ifx_peaking_filter.h"
+#include "pico/platform.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -28,16 +29,21 @@ void IFX_PeakingFilter_SetParameters(IFX_PeakingFilter *filt, float centerFreque
     filt->b[2] = -(4.0f - 2.0f * Q * wcT + wcT * wcT);
 }
 
-float IFX_PeakingFilter_Update(IFX_PeakingFilter *filt, float in) {
-    filt->x[2] = filt->x[1];
-    filt->x[1] = filt->x[0];
-    filt->x[0] = in;
+float __not_in_flash_func(IFX_PeakingFilter_Update)(IFX_PeakingFilter *filt, float in) {
+    /* Direct Form I with states cached in locals: identical arithmetic to
+     * the shift-array version, but the compiler keeps everything in FPU
+     * registers instead of re-loading struct members (pointer aliasing
+     * otherwise forces a load/store per term). x[2]/y[2] slots are unused. */
+    float x1 = filt->x[0];   /* in[n-1] */
+    float x2 = filt->x[1];   /* in[n-2] */
+    float y1 = filt->y[0];   /* out[n-1] */
+    float y2 = filt->y[1];   /* out[n-2] */
 
-    filt->y[2] = filt->y[1];
-    filt->y[1] = filt->y[0];
+    float y0 = (filt->a[0] * in + filt->a[1] * x1 + filt->a[2] * x2
+              + filt->b[1] * y1 + filt->b[2] * y2) * filt->b[0];
 
-    filt->y[0] = (filt->a[0] * filt->x[0] + filt->a[1] * filt->x[1] + filt->a[2] * filt->x[2]
-               + filt->b[1] * filt->y[1] + filt->b[2] * filt->y[2]) * filt->b[0];
+    filt->x[1] = x1;  filt->x[0] = in;
+    filt->y[1] = y1;  filt->y[0] = y0;
 
-    return filt->y[0];
+    return y0;
 }

@@ -1,8 +1,12 @@
 #include "ifx_overdrive.h"
+#include "pico/platform.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
 #endif
+
+/* Clip curve steepness (constant for the asymmetric soft clipper) */
+#define IFX_OD_CLIP_D 8.0f
 
 float IFX_OD_LPF_INP_COEF[IFX_OVERDRIVE_LPF_INP_LENGTH] = {
     -0.00020692388031130378f,
@@ -105,6 +109,7 @@ void IFX_Overdrive_Init(IFX_Overdrive *od, float samplingFrequencyHz,
     }
 
     od->Q = -0.2f;
+    od->clipConst = od->Q / (1.0f - expf(IFX_OD_CLIP_D * od->Q));
     od->out = 0.0f;
 }
 
@@ -127,25 +132,32 @@ void IFX_Overdrive_SetLPF(IFX_Overdrive *od, float lpfCutoffFrequencyHz, float l
 
 void IFX_Overdrive_SetQ(IFX_Overdrive *od, float Q) {
     od->Q = Q;
+    od->clipConst = Q / (1.0f - expf(IFX_OD_CLIP_D * Q));
 }
 
-float IFX_Overdrive_Update(IFX_Overdrive *od, float inp) {
-    /* FIR LPF at fs/4 to prevent aliasing from signal squaring */
-    od->lpfInpBuf[od->lpfInpBufIndex] = inp;
-    od->lpfInpBufIndex++;
-    if (od->lpfInpBufIndex == IFX_OVERDRIVE_LPF_INP_LENGTH) {
-        od->lpfInpBufIndex = 0;
-    }
+float __not_in_flash_func(IFX_Overdrive_Update)(IFX_Overdrive *od, float inp) {
+    /* FIR LPF at fs/4 to prevent aliasing from signal squaring.
+     * Two-segment convolution: the circular buffer is walked newest->oldest
+     * as two contiguous runs, so there is no wrap test on every tap
+     * (69 branches per sample removed vs. the naive loop). */
+    int wr = od->lpfInpBufIndex;          /* current write slot */
+    od->lpfInpBuf[wr] = inp;
+    wr++;
+    if (wr == IFX_OVERDRIVE_LPF_INP_LENGTH) wr = 0;
+    od->lpfInpBufIndex = (uint8_t)wr;
 
-    od->lpfInpOut = 0.0f;
-    uint8_t index = od->lpfInpBufIndex;
-    for (uint8_t n = 0; n < IFX_OVERDRIVE_LPF_INP_LENGTH; n++) {
-        if (index == 0) {
-            index = IFX_OVERDRIVE_LPF_INP_LENGTH - 1;
-        } else {
-            index--;
+    {
+        const float *coef = IFX_OD_LPF_INP_COEF;
+        const float *buf  = od->lpfInpBuf;
+        float acc = 0.0f;
+        int n = 0;
+        for (int k = wr - 1; k >= 0; k--) {           /* newest .. buf[0]   */
+            acc += coef[n++] * buf[k];
         }
-        od->lpfInpOut += IFX_OD_LPF_INP_COEF[n] * od->lpfInpBuf[index];
+        for (int k = IFX_OVERDRIVE_LPF_INP_LENGTH - 1; k >= wr; k--) {
+            acc += coef[n++] * buf[k];                /* buf[end] .. oldest */
+        }
+        od->lpfInpOut = acc;
     }
 
     /* 1st-order IIR HPF to remove low frequency mud */
@@ -157,13 +169,12 @@ float IFX_Overdrive_Update(IFX_Overdrive *od, float inp) {
                           / (2.0f + od->hpfInpWcT);
     od->hpfInpOut = od->hpfInpBufOut[0];
 
-    /* Asymmetrical soft clipping */
+    /* Asymmetrical soft clipping (constant term precomputed in SetQ) */
     float xGain = (od->preGain + od->boostGain) * od->hpfInpOut;
-    const float d = 8.0f;
 
-    float clipOut = od->Q / (1.0f - expf(d * od->Q));
+    float clipOut = od->clipConst;
     if ((xGain - od->Q) >= 0.00001f) {
-        clipOut += (xGain - od->Q) / (1.0f - expf(-d * (xGain - od->Q)));
+        clipOut += (xGain - od->Q) / (1.0f - expf(-IFX_OD_CLIP_D * (xGain - od->Q)));
     }
 
     /* 2nd-order IIR LPF to remove HF artifacts */

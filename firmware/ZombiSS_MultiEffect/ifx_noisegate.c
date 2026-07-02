@@ -1,4 +1,5 @@
 #include "ifx_noisegate.h"
+#include "pico/platform.h"
 
 void IFX_NoiseGate_Init(IFX_NoiseGate *ng, float threshold, float attackTimeMs,
                          float releaseTimeMs, float holdTimeMs, float sampleRateHz) {
@@ -12,7 +13,7 @@ void IFX_NoiseGate_Init(IFX_NoiseGate *ng, float threshold, float attackTimeMs,
     IFX_MovingRMS_Init(&ng->mrms, (uint16_t)(sampleRateHz * IFX_NOISEGATE_RMS_HORIZON_MS * 0.001f));
 }
 
-float IFX_NoiseGate_Update(IFX_NoiseGate *ng, float inp) {
+float __not_in_flash_func(IFX_NoiseGate_Update)(IFX_NoiseGate *ng, float inp) {
     float inRMSSq = IFX_MovingRMS_Update(&ng->mrms, inp);
 
     float gain = 1.0f;

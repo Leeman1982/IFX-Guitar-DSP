@@ -7,9 +7,9 @@
  *   Core 0: Real-time audio DSP (PIO I2S + DMA interrupt)
  *   Core 1: UI (SH1106 OLED + EC11 rotary encoder + buttons)
  *
- * Audio I/O:
- *   Input:  PCM1808 ADC via PIO1 I2S
- *   Output: PCM5102 DAC via PIO0 I2S
+ * Audio I/O (both chips in I2S Philips format, FMT=GND):
+ *   Input:  PCM1808 ADC via PIO1 I2S (slave; SCKI on GP22, BCK/LRCK bridged)
+ *   Output: PCM5102 DAC via PIO0 I2S (master; XSMT on GP0 held HIGH)
  *
  * Effects Chain:
  *   1. Noise Gate   2. Overdrive   3. Peaking EQ
@@ -63,50 +63,50 @@ static const uint32_t TONE_PHASE_INC = 89479U;
 /*
  * Called from DMA IRQ on Core 0.
  * Latency: 64 frames / 48kHz = ~1.33ms per buffer = ~2.67ms round-trip.
+ *
+ * I2S Philips 24-bit word layout (both PCM chips have FMT=GND):
+ *   bit 31    = delay bit (1-BCK I2S delay slot; ignored by the DAC,
+ *               junk from the ADC)
+ *   bits 30-7 = B23..B0 (24-bit signed audio, MSB first)
+ *   bits 6-0  = zeros
+ *
+ * __not_in_flash_func: the whole audio path runs from SRAM so the DMA IRQ
+ * never stalls on an XIP flash-cache miss.
  */
-static void audio_process_callback(const int32_t *input, int32_t *output, uint32_t frame_count_arg) {
+static void __not_in_flash_func(audio_process_callback)(const int32_t *input, int32_t *output, uint32_t frame_count_arg) {
     static uint32_t total_frames = 0;
 
     for (uint32_t i = 0; i < frame_count_arg; i++) {
-        int32_t out_i32;
+        float out;
 
         if (total_frames < TONE_DURATION_FRAMES) {
             /* --- Diagnostic 1kHz sine tone (first 2 seconds) --- */
-            /* Fast sine approximation using phase accumulator.
-             * Maps 0–2^32 → 0–2π via Bhaskara I approximation. */
             uint32_t phase = tone_phase_acc;
             tone_phase_acc += TONE_PHASE_INC;
 
             /* Normalise phase to [0, 1) then use sinf for correctness */
-            float t   = (float)phase * (1.0f / 4294967296.0f); /* 0..1 */
-            float s   = sinf(t * 6.2831853f) * 0.5f;           /* ±0.5 amplitude */
-
-            out_i32 = (int32_t)(s * 8388607.0f);
-            if (out_i32 >  8388607) out_i32 =  8388607;
-            if (out_i32 < -8388608) out_i32 = -8388608;
-            out_i32 <<= 8;
+            float t = (float)phase * (1.0f / 4294967296.0f); /* 0..1 */
+            out     = sinf(t * 6.2831853f) * 0.5f;           /* ±0.5 amplitude */
 
             total_frames++;
         } else {
             /* --- Normal guitar processing --- */
             int32_t raw_left = input[i * 2];
 
-            /* 24-bit I2S → float [-1.0, +1.0]
-             * I2S standard has a 1-bit delay: first BCK rising edge after LRCK
-             * holds old data; actual MSB starts on the second rising edge.
-             * The raw 32-bit word is: [delay_bit | audio_23..0 | padding_6bits]
-             * Shift out the delay bit before extracting the 24-bit value. */
-            float inp = (float)((raw_left << 1) >> 8) / 8388608.0f;
+            /* Philips word → float [-1, +1): shift out the delay bit
+             * (uint32_t cast keeps the left shift well-defined), then an
+             * arithmetic >>8 sign-extends the 24-bit value. */
+            float inp = (float)((int32_t)((uint32_t)raw_left << 1) >> 8) / 8388608.0f;
 
-            /* Process effect chain */
-            float out = EffectChain_Process(&g_fx_chain, inp);
-
-            /* Float → 24-bit I2S (left-justified in 32-bit word) */
-            out_i32 = (int32_t)(out * 8388607.0f);
-            if (out_i32 >  8388607) out_i32 =  8388607;
-            if (out_i32 < -8388608) out_i32 = -8388608;
-            out_i32 <<= 8;
+            out = EffectChain_Process(&g_fx_chain, inp);
         }
+
+        /* Float → Philips word: clamp to 24-bit, mask, land audio in
+         * bits 30..7 with bit31 = 0 (delay slot). */
+        int32_t audio24 = (int32_t)(out * 8388607.0f);
+        if (audio24 >  8388607) audio24 =  8388607;
+        if (audio24 < -8388608) audio24 = -8388608;
+        int32_t out_i32 = (int32_t)(((uint32_t)audio24 & 0x00FFFFFFu) << 7);
 
         /* Stereo output (same signal both channels) */
         output[i * 2]     = out_i32;
@@ -126,9 +126,9 @@ void setup() {
      * Target: 256 × 48000 = 12.288 MHz.
      * PWM: 150 MHz / 12 = 12.5 MHz (1.7% off, within PCM1808 tolerance). */
     {
-        uint scki_slice = pwm_gpio_to_slice_num(22);
-        uint scki_chan  = pwm_gpio_to_channel(22);
-        gpio_set_function(22, GPIO_FUNC_PWM);
+        uint scki_slice = pwm_gpio_to_slice_num(PCM1808_SCKI_PIN);
+        uint scki_chan  = pwm_gpio_to_channel(PCM1808_SCKI_PIN);
+        gpio_set_function(PCM1808_SCKI_PIN, GPIO_FUNC_PWM);
         pwm_set_clkdiv(scki_slice, 1.0f);
         pwm_set_wrap(scki_slice, 11);               /* 12 counts → 12.5 MHz  */
         pwm_set_chan_level(scki_slice, scki_chan, 6); /* 50% duty cycle       */

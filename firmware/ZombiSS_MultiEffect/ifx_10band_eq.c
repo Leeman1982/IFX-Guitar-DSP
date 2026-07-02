@@ -1,4 +1,5 @@
 #include "ifx_10band_eq.h"
+#include "pico/platform.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -47,7 +48,7 @@ void IFX_10BandEQ_SetBand(IFX_10BandEQ *eq, uint8_t band, float gainDb) {
     IFX_PeakingFilter_SetParameters(&eq->bands[band], fc, bw, db_to_linear(gainDb));
 }
 
-float IFX_10BandEQ_Update(IFX_10BandEQ *eq, float in) {
+float __not_in_flash_func(IFX_10BandEQ_Update)(IFX_10BandEQ *eq, float in) {
     float sig = in;
     for (uint8_t i = 0; i < EQ10_BANDS; i++) {
         sig = IFX_PeakingFilter_Update(&eq->bands[i], sig);

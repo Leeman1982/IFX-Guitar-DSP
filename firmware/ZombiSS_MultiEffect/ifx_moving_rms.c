@@ -1,4 +1,5 @@
 #include "ifx_moving_rms.h"
+#include "pico/platform.h"
 
 void IFX_MovingRMS_Init(IFX_MovingRMS *mrms, uint16_t M) {
     if (M > IFX_MOVING_RMS_MAX_BUF) M = IFX_MOVING_RMS_MAX_BUF;
@@ -11,7 +12,7 @@ void IFX_MovingRMS_Init(IFX_MovingRMS *mrms, uint16_t M) {
     mrms->out_sq = 0.0f;
 }
 
-float IFX_MovingRMS_Update(IFX_MovingRMS *mrms, float in) {
+float __not_in_flash_func(IFX_MovingRMS_Update)(IFX_MovingRMS *mrms, float in) {
     float in_sq = in * in;
     mrms->in_sq_M[mrms->count] = in_sq;
     if (mrms->count == (mrms->M - 1)) {

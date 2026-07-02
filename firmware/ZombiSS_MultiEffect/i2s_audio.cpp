@@ -22,11 +22,21 @@ static audio_callback_t audio_cb = NULL;
 static volatile uint32_t frame_count = 0;
 static volatile uint32_t underruns = 0;
 
-/* DMA IRQ handler */
+/* DMA IRQ handler.
+ *
+ * IMPORTANT: the IRQ fires on RX (input) channel completion, NOT TX.
+ * The TX DMA always leads the RX DMA by ~8-10 words because the joined
+ * 8-deep TX FIFO is primed ahead of playback, while input words only
+ * arrive after 32 BCK each. Firing on TX completion (the old scheme)
+ * meant rx_buf[i] was still being written — its last words were stale
+ * when the callback read them, and resetting the RX write address on a
+ * BUSY channel corrupted the input alignment every buffer (a periodic
+ * 750 Hz artifact). By RX ch[i] completion, TX ch[i] finished ~100 us
+ * earlier, so both channels are idle and both resets are safe. */
 static void __isr __time_critical_func(dma_irq_handler)(void) {
     for (int i = 0; i < 2; i++) {
-        if (dma_channel_get_irq0_status(dma_out_ch[i])) {
-            dma_channel_acknowledge_irq0(dma_out_ch[i]);
+        if (dma_channel_get_irq0_status(dma_in_ch[i])) {
+            dma_channel_acknowledge_irq0(dma_in_ch[i]);
 
             if (audio_cb) {
                 audio_cb(rx_buf[i], tx_buf[i], AUDIO_BUFFER_FRAMES);
@@ -34,7 +44,7 @@ static void __isr __time_critical_func(dma_irq_handler)(void) {
 
             frame_count += AUDIO_BUFFER_FRAMES;
 
-            /* Re-configure for next cycle */
+            /* Re-arm both idle channels for the next ping-pong cycle */
             dma_channel_set_read_addr(dma_out_ch[i], tx_buf[i], false);
             dma_channel_set_write_addr(dma_in_ch[i], rx_buf[i], false);
         }
@@ -110,9 +120,9 @@ void I2SAudio_Init(audio_callback_t callback) {
                           rx_buf[1], &pio_in->rxf[sm_in],
                           AUDIO_BUFFER_TOTAL, false);
 
-    /* IRQ on TX DMA completion */
-    dma_channel_set_irq0_enabled(dma_out_ch[0], true);
-    dma_channel_set_irq0_enabled(dma_out_ch[1], true);
+    /* IRQ on RX DMA completion (see dma_irq_handler for why RX, not TX) */
+    dma_channel_set_irq0_enabled(dma_in_ch[0], true);
+    dma_channel_set_irq0_enabled(dma_in_ch[1], true);
 
     irq_set_exclusive_handler(DMA_IRQ_0, dma_irq_handler);
     irq_set_enabled(DMA_IRQ_0, true);
@@ -124,8 +134,14 @@ void I2SAudio_Start(void) {
     dma_channel_start(dma_out_ch[0]);
     dma_channel_start(dma_in_ch[0]);
 
-    pio_sm_set_enabled(pio_out, sm_out, true);
+    /* Enable the INPUT state machine first: it advances to "wait 1 pin 2"
+     * (waiting for the first BCK rising edge) and blocks there, armed.
+     * Only then start the output SM that generates BCK/LRCK. Enabling the
+     * output first risks it emitting the first BCK edge before the input
+     * SM is armed, which would rotate every captured word by one bit
+     * permanently (the input resynchronises only on LRCK *edges*). */
     pio_sm_set_enabled(pio_in, sm_in, true);
+    pio_sm_set_enabled(pio_out, sm_out, true);
 }
 
 void I2SAudio_Stop(void) {

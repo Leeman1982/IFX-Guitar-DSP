@@ -1,4 +1,5 @@
 #include "effect_chain.h"
+#include "pico/platform.h"
 
 /* Compile-time guard: EQ param count must match the actual number of EQ bands */
 _Static_assert(EQ_PARAM_COUNT == EQ10_BANDS,
@@ -76,6 +77,7 @@ void EffectChain_Init(EffectChain *ec) {
     ec->active[FX_CHORUS]    = false;
     ec->active[FX_DELAY]     = false;
     ec->masterVolume = 0.8f;
+    ec->volSmoothed  = 0.8f;
 
     IFX_TSBoost_Init(&ec->tsboost, SAMPLE_RATE_HZ);
     IFX_TSBoost_SetDrive(&ec->tsboost, ec->params[FX_TSBOOST][TS_DRIVE].value);
@@ -119,7 +121,7 @@ void EffectChain_Init(EffectChain *ec) {
         SAMPLE_RATE_HZ);
 }
 
-float EffectChain_Process(EffectChain *ec, float inp) {
+float __not_in_flash_func(EffectChain_Process)(EffectChain *ec, float inp) {
     float sig = inp;
     if (ec->active[FX_TSBOOST])   sig = IFX_TSBoost_Update(&ec->tsboost, sig);
     if (ec->active[FX_NOISEGATE]) sig = IFX_NoiseGate_Update(&ec->noiseGate, sig);
@@ -128,7 +130,10 @@ float EffectChain_Process(EffectChain *ec, float inp) {
     if (ec->active[FX_CHORUS])    sig = IFX_Chorus_Update(&ec->chorus, sig);
     if (ec->active[FX_DELAY])     sig = IFX_Delay_Update(&ec->delay, sig);
 
-    sig *= ec->masterVolume;
+    /* One-pole ramp toward the UI's target volume (~14 ms time constant)
+     * so knob turns never step the gain hard enough to click. */
+    ec->volSmoothed += 0.0015f * (ec->masterVolume - ec->volSmoothed);
+    sig *= ec->volSmoothed;
     if (sig >  1.0f) sig =  1.0f;
     if (sig < -1.0f) sig = -1.0f;
     return sig;

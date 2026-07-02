@@ -43,6 +43,9 @@ typedef struct {
 
     float out;
     float Q;
+    /* Precomputed Q / (1 - e^(d*Q)) — depends only on Q, so it is evaluated
+     * in Init/SetQ instead of paying one expf() per sample in the hot path. */
+    float clipConst;
 } IFX_Overdrive;
 
 void  IFX_Overdrive_Init(IFX_Overdrive *od, float samplingFrequencyHz,

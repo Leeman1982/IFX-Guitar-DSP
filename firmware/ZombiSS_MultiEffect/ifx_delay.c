@@ -1,4 +1,5 @@
 #include "ifx_delay.h"
+#include "pico/platform.h"
 
 void IFX_Delay_Init(IFX_Delay *dly, float delayTime_ms, float mix, float feedback, float sampleRate_Hz) {
     IFX_Delay_SetLength(dly, delayTime_ms, sampleRate_Hz);
@@ -11,7 +12,7 @@ void IFX_Delay_Init(IFX_Delay *dly, float delayTime_ms, float mix, float feedbac
     dly->out = 0.0f;
 }
 
-float IFX_Delay_Update(IFX_Delay *dly, float inp) {
+float __not_in_flash_func(IFX_Delay_Update)(IFX_Delay *dly, float inp) {
     float delayLineOutput = dly->line[dly->lineIndex];
     float delayLineInput  = inp + dly->feedback * delayLineOutput;
     dly->line[dly->lineIndex] = delayLineInput;

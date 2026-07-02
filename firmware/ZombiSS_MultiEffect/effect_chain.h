@@ -99,7 +99,9 @@ typedef struct {
     IFX_Delay        delay;
 
     bool active[FX_COUNT];
-    float masterVolume;
+    float masterVolume;    /* target, written by Core 1 UI */
+    float volSmoothed;     /* one-pole smoothed copy, Core 0 only — prevents
+                              zipper clicks while the volume knob is turned */
 
     ParamDesc params[FX_COUNT][MAX_PARAMS_PER_FX];
     uint8_t paramCount[FX_COUNT];

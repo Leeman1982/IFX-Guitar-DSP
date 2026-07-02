@@ -12,40 +12,50 @@
 #include "hardware/clocks.h"
 
 /* ============================================================
- * I2S OUTPUT (PCM5102 DAC)
- * PIO program: 32-bit stereo, MSB-first, I2S Philips standard
+ * I2S OUTPUT (PCM5102 DAC) — MASTER, 48 kHz, 32 BCK/channel (64 fs)
  *
- * Side-set pin 0 = BCK  (bit clock)
- * Side-set pin 1 = LRCK (word select)
- * Out pin 0      = DIN  (serial data)
+ * Side-set bit 0 = BCK  (bit clock)  -> side-set BASE   = GP17
+ * Side-set bit 1 = LRCK (word select)-> side-set BASE+1 = GP18
+ * Out pin 0      = DIN  (serial data)                   = GP16
+ *
+ * Side-set value notation below is 0b<LRCK><BCK> (bit1=LRCK, bit0=BCK).
  *
  * .side_set 2
  * .wrap_target
- *   set x, 30       side 0b00    ; 0: LEFT channel start
+ *   set x, 30       side 0b00    ; 0: LEFT start (LRCK=0, BCK=0), load count
  * left_loop:
- *   out pins, 1     side 0b00    ; 1: Output bit, BCK low
- *   jmp x-- left    side 0b10    ; 2: Rising BCK edge
- *   out pins, 1     side 0b00    ; 3: Last left bit, BCK low
- *   nop             side 0b10    ; 4: Last rising edge
- *   set x, 30       side 0b01    ; 5: RIGHT channel start
+ *   out pins, 1     side 0b00    ; 1: data on BCK low
+ *   jmp x-- left    side 0b01    ; 2: BCK rising edge (receiver samples)
+ *   out pins, 1     side 0b00    ; 3: 32nd left bit, BCK low
+ *   nop             side 0b01    ; 4: BCK rising edge
+ *   set x, 30       side 0b10    ; 5: RIGHT start (LRCK->1, BCK=0)
  * right_loop:
- *   out pins, 1     side 0b01    ; 6: Output bit, BCK low
- *   jmp x-- right   side 0b11    ; 7: Rising BCK edge
- *   out pins, 1     side 0b01    ; 8: Last right bit
- *   nop             side 0b11    ; 9: Last rising edge
- * .wrap
+ *   out pins, 1     side 0b10    ; 6: data on BCK low
+ *   jmp x-- right   side 0b11    ; 7: BCK rising edge
+ *   out pins, 1     side 0b10    ; 8: 32nd right bit, BCK low
+ *   nop             side 0b11    ; 9: BCK rising edge
+ * .wrap                          ; -> 0: LRCK->0 (back to left)
+ *
+ * NOTE: opcodes verified against the pico-SDK encoder (pio_encode_*).
+ *   Two fatal bugs were fixed vs. the earlier hand-assembly:
+ *     1. jmp condition was 0b110 (PIN) instead of 0b010 (X--). With the
+ *        default JMP_PIN = GP0 (= XSMT, held HIGH), every jump was always
+ *        taken -> infinite loops -> no valid I2S -> silence.
+ *     2. side-set bit order was swapped (BCK on bit1/GP18 instead of
+ *        bit0/GP17), conflicting with config.h, the bridge wires and the
+ *        PCM5102/PCM1808 pin map.
  * ============================================================ */
 
 static const uint16_t i2s_out_program_instructions[] = {
     0xE03E, /* 0: set x, 30       side 0b00 */
     0x6001, /* 1: out pins, 1     side 0b00 */
-    0x10C1, /* 2: jmp x--, 1      side 0b10 */
+    0x0841, /* 2: jmp x--, 1      side 0b01 */
     0x6001, /* 3: out pins, 1     side 0b00 */
-    0xB042, /* 4: nop             side 0b10 */
-    0xE83E, /* 5: set x, 30       side 0b01 */
-    0x6801, /* 6: out pins, 1     side 0b01 */
-    0x18C6, /* 7: jmp x--, 6      side 0b11 */
-    0x6801, /* 8: out pins, 1     side 0b01 */
+    0xA842, /* 4: nop             side 0b01 */
+    0xF03E, /* 5: set x, 30       side 0b10 */
+    0x7001, /* 6: out pins, 1     side 0b10 */
+    0x1846, /* 7: jmp x--, 6      side 0b11 */
+    0x7001, /* 8: out pins, 1     side 0b10 */
     0xB842, /* 9: nop             side 0b11 */
 };
 
@@ -81,9 +91,11 @@ static inline void i2s_out_program_init(PIO pio, uint sm, uint offset,
     /* Join TX FIFO for deeper buffer */
     sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
 
-    /* Clock divider: BCK = sample_rate * 64, PIO = 2 * BCK */
+    /* Clock divider: this program executes 130 PIO cycles per stereo frame
+     * (65 per channel: 1 set-x + 31x(out+jmp) + out + nop = 65), NOT 128.
+     * target = 48000 * 65 * 2 makes LRCK exactly 48 kHz, BCK = 3.072 MHz. */
     float sys_clk = (float)clock_get_hz(clk_sys);
-    float target = 48000.0f * 64.0f * 2.0f;
+    float target = 48000.0f * 65.0f * 2.0f;
     sm_config_set_clkdiv(&c, sys_clk / target);
 
     pio_sm_init(pio, sm, offset, &c);
@@ -99,6 +111,10 @@ static inline void i2s_out_program_init(PIO pio, uint sm, uint offset,
  * In-base pin 2 = BCK  (from output PIO, directly wired)
  *
  * No side-set, runs at system clock to catch BCK edges.
+ *
+ * NOTE: opcodes verified against the pico-SDK encoder. The two jmp x--
+ *   instructions previously decoded as jmp PIN (cond 0b110, always taken
+ *   with JMP_PIN = GP0 held HIGH) -> infinite loop -> no captured samples.
  *
  * wait_left:
  *   wait 0 pin 1        ; 0:  Wait for LRCK low  (left channel)
@@ -129,14 +145,14 @@ static const uint16_t i2s_in_program_instructions[] = {
     0x2022, /*  2: wait 0 pin 2       */
     0x20A2, /*  3: wait 1 pin 2       */
     0x4001, /*  4: in pins, 1         */
-    0x00C2, /*  5: jmp x--, 2         */
+    0x0042, /*  5: jmp x--, 2         */
     0x8020, /*  6: push block         */
     0x20A1, /*  7: wait 1 pin 1       */
     0xE03F, /*  8: set x, 31          */
     0x2022, /*  9: wait 0 pin 2       */
     0x20A2, /* 10: wait 1 pin 2       */
     0x4001, /* 11: in pins, 1         */
-    0x00C9, /* 12: jmp x--, 9         */
+    0x0049, /* 12: jmp x--, 9         */
     0x8020, /* 13: push block         */
     0x0000, /* 14: jmp 0              */
 };
