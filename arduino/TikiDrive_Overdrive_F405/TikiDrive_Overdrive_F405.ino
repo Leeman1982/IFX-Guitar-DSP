@@ -31,6 +31,8 @@
  *    PA8  status LED (on = effect engaged), through ~1k resistor to GND
  */
 
+#include <Arduino.h>
+#include "stm32f4xx_hal.h"   /* raw HAL types (I2S/DMA/RCC) - not pulled in by Arduino.h */
 #include "IFX_Overdrive.h"
 
 /* ------------------------------------------------------------------ */
