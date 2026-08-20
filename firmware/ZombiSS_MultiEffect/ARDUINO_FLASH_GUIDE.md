@@ -166,8 +166,13 @@ After upload completes:
 | BCK | GP17 |
 | LRCK | GP18 |
 | SCK | GND |
-| XSMT | 3.3V |
+| XSMT | GP0 (driven HIGH by firmware after init) |
 | FMT | GND |
+
+> **Do not** tie XSMT directly to 3.3V. The firmware drives it from GP0
+> deliberately, holding it muted until the I2S clocks and buffers are ready
+> and only then unmuting — this is what prevents a power-on pop/click.
+> Hardwiring XSMT to 3.3V bypasses that protection.
 
 ### PCM1808 ADC (Input)
 | Pin | GPIO |
@@ -186,20 +191,43 @@ After upload completes:
 | SCL | GP5 |
 | TRA (Enc A) | GP10 |
 | TRB (Enc B) | GP11 |
-| PSH (Enc SW) | GP12 |
-| BAK (Back) | GP14 |
-| CON (Confirm) | GP15 |
+| PSH (Enc SW) | MUX CH7 (see below — NOT a direct GPIO) |
+| BAK (Back) | MUX CH5 (see below — NOT a direct GPIO) |
+| CON (Confirm) | MUX CH6 (see below — NOT a direct GPIO) |
 | VCC | 3.3V |
 | GND | GND |
 
-### Effect Bypass Switches (momentary, to GND)
-| Switch | GPIO | Effect |
-|--------|------|--------|
-| SW1 | GP6 | Noise Gate |
-| SW2 | GP7 | Overdrive |
-| SW3 | GP8 | EQ |
-| SW4 | GP9 | Chorus |
-| SW5 | GP13 | Delay |
+> **Warning:** This is the MUX Edition firmware. PSH/BAK/CON do **not** go to
+> raw GPIOs — they are scanned through the CD74HC4067 multiplexer below, along
+> with all five effect-bypass switches. `rotary_encoder.cpp` only ever reads
+> the MUX signal pin (GP8); there is no direct-GPIO button code path.
+> **Do not** wire any switch straight to GP6/GP7/GP8 — the firmware drives
+> those as MUX select/signal lines, and a switch to GND on an output pin
+> shorts it.
+
+### CD74HC4067 Multiplexer (all buttons — bypass switches + encoder nav)
+| MUX Pin | GPIO |
+|---------|------|
+| EN  | GND (tied low — always enabled) |
+| S0  | GP2 |
+| S1  | GP3 |
+| S2  | GP6 |
+| S3  | GP7 |
+| SIG | GP8 (internal pull-up enabled; pressed = SIG pulled LOW) |
+
+Each button: one leg to the MUX channel pin below, other leg to GND.
+
+| Channel | Function |
+|---------|----------|
+| CH0 | FX1 — TS Boost toggle |
+| CH1 | FX2 — Noise Gate toggle |
+| CH2 | FX3 — Overdrive toggle |
+| CH3 | FX4 — EQ toggle |
+| CH4 | FX5 — Chorus toggle |
+| CH5 | Nav: Back |
+| CH6 | Nav: Confirm |
+| CH7 | Encoder push (PSH) |
+| CH8–15 | Spare |
 
 ---
 

@@ -93,6 +93,14 @@ static void audio_process_callback(const int32_t *input, int32_t *output,
          * Individual aligned float reads from g_fx_chain are atomic on Cortex-M33;
          * the DMB barrier in SetParam ensures writes from Core 1 are visible here. */
         float out = EffectChain_Process(&g_fx_chain, inp) * smooth_vol;
+        /* Last-resort safety net: NaN compares false against every < / > test,
+         * so the clamps below cannot catch it, and casting a NaN float to
+         * int32_t is undefined behaviour right before it reaches the DAC.
+         * `out != out` is true only for NaN. No legitimate signal/parameter
+         * path in this chain currently produces one (all divisions in the
+         * DSP stages were audited to have non-zero denominators across the
+         * full clamped parameter range) — this is defense-in-depth only. */
+        if (out != out) out = 0.0f;
         if (out >  1.0f) out =  1.0f;
         if (out < -1.0f) out = -1.0f;
 
