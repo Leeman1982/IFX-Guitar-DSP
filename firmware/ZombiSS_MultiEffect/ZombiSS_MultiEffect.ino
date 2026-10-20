@@ -19,7 +19,7 @@
  *   1. Boost Factory (9 circuit-modelled pedals)   2. Noise Gate
  *   3. Overdrive   4. 10-Band EQ   5. Chorus   6. Delay
  *
- * Clock: set "CPU Speed" in the Arduino Tools menu (240 MHz recommended —
+ * Clock: set "CPU Speed" in the Arduino Tools menu (250 MHz recommended —
  * the transistor fuzz models need it).  The sketch no longer overrides it.
  *
  * Original DSP algorithms by Philip Salmony @ phils-lab.net
@@ -197,8 +197,9 @@ static void __not_in_flash_func(audio_process_callback)(const int32_t *input, in
 
 /* PCM1808 needs SCKI = 256, 384 or 512 × fs.  Derive it from whatever system
  * clock the Arduino "CPU Speed" menu selected with an integer PWM divider,
- * picking the ratio with the smallest error (240 MHz → ÷13 = 18.46 MHz =
- * 384.6·fs, +0.16 %; 150 MHz → ÷12 = 12.5 MHz = 260·fs, +1.7 %). */
+ * picking the ratio with the smallest error (250 MHz → ÷20 = 12.5 MHz =
+ * 260.4·fs, +1.7 %, same SCKI as the original 150 MHz build; 240 MHz → ÷13 =
+ * 18.46 MHz = 384.6·fs, +0.16 %). */
 static void start_pcm1808_scki(void) {
     const uint32_t sys = clock_get_hz(clk_sys);
     const uint32_t ratios[3] = { 256u, 384u, 512u };

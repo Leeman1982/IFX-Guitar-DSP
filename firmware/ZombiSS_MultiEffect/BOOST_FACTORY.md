@@ -169,20 +169,20 @@ runs the rest of the chain. Core 1 also runs the UI and the matrix rebuilds; the
 interrupt preempts both.
 
 Arm doesn't publish Cortex-M33 FPU instruction timings, so cost is given two ways
-(Cortex-M33 in QEMU, `-O2`, per 48 kHz sample; budget at 240 MHz = 5000 cycles):
+(Cortex-M33 in QEMU, `-O2`, per 48 kHz sample; budget at 250 MHz = 5208 cycles):
 
-| Model | Instructions | Pessimistic cycles (VFMA 3, VLDR 2, VDIV 14) | % of core 1 at 240 MHz |
+| Model | Instructions | Pessimistic cycles (VFMA 3, VLDR 2, VDIV 14) | % of core 1 at 250 MHz |
 |-------|-------------|------------------|-------------------|
-| TS808 | 976 | 2800 | 20–56 % |
-| KLON | 1047 | 3160 | 21–63 % |
-| DIST+ | 937 | 2280 | 19–46 % |
-| RAT | 1093 | 3120 | 22–62 % |
-| DS-1 | 1340 | 3560 | 27–71 % |
-| BIG MUFF | 2278 | 5400 | 46–108 % |
-| FUZZFACE Ge | 2077 | 4730 | 42–95 % |
-| FUZZFACE Si | 1870 | 4770 | 37–95 % |
-| RANGEMSTR | 966 | 2490 | 19–50 % |
-| Rest of chain on core 0 (gate+OD+EQ+chorus+delay all on) | ~850 | ~2180 | 17–44 % of core 0 |
+| TS808 | 976 | 2800 | 19–54 % |
+| KLON | 1047 | 3160 | 20–61 % |
+| DIST+ | 937 | 2280 | 18–44 % |
+| RAT | 1093 | 3120 | 21–60 % |
+| DS-1 | 1340 | 3560 | 26–68 % |
+| BIG MUFF | 2278 | 5400 | 44–104 % |
+| FUZZFACE Ge | 2077 | 4730 | 40–91 % |
+| FUZZFACE Si | 1870 | 4770 | 36–92 % |
+| RANGEMSTR | 966 | 2490 | 19–48 % |
+| Rest of chain on core 0 (gate+OD+EQ+chorus+delay all on) | ~850 | ~2180 | 16–42 % of core 0 |
 
 The real figure lies between those bounds **[Likely]**. Three safeguards cover the uncertain end:
 

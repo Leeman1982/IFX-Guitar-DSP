@@ -50,7 +50,7 @@ Go to **Tools** menu and set the following:
 |---------|-------|
 | **Board** | `Raspberry Pi Pico 2` |
 | **Flash Size** | `4MB (no FS)` |
-| **CPU Speed** | `240 MHz (Overclock)` — required for the Boost Factory fuzz models; the firmware no longer forces a clock, so this menu setting is what runs |
+| **CPU Speed** | `250 MHz (Overclock)` — required for the Boost Factory fuzz models; the firmware no longer forces a clock, so this menu setting is what runs |
 | **Optimize** | `Optimize Even More (-O2)` (the DSP files force `-O2` themselves, so `Small (-Os)` also works) |
 | **USB Stack** | `Pico SDK` |
 | **IP/Bluetooth Stack** | `IPv4 Only` |

@@ -87,10 +87,10 @@
 
 /* ===== System Clock ===== */
 /* Set by Arduino IDE → Tools → CPU Speed (F_CPU).  The Boost Factory's
- * transistor-fuzz models need ≥ 200 MHz; 240 MHz is the recommended setting.
+ * transistor-fuzz models need ≥ 200 MHz; 250 MHz is the recommended setting.
  * Audio clocks (PIO I2S dividers, PCM1808 SCKI) adapt to the chosen speed. */
 #if defined(F_CPU) && (F_CPU < 200000000L)
-#warning "CPU Speed below 200 MHz: select 240 MHz in Tools > CPU Speed for the Boost Factory fuzz models"
+#warning "CPU Speed below 200 MHz: select 250 MHz in Tools > CPU Speed for the Boost Factory fuzz models"
 #endif
 
 /* ===== Boost Factory ===== */

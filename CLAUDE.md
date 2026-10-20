@@ -1,7 +1,7 @@
 # IFX Guitar DSP Algorithms — Professional Audio Processing Library
 
 **Project:** ZOMBI SS Multi-Effect DSP Unit  
-**Platform:** RP2350 (dual-core ARM Cortex-M33) @ 240 MHz (Arduino Tools → CPU Speed)  
+**Platform:** RP2350 (dual-core ARM Cortex-M33) @ 250 MHz (Arduino Tools → CPU Speed)  
 **Audio:** 48 kHz, 24-bit I2S I/O  
 **Original DSP:** Philip Salmony (@phils-lab.net) — ported to RP2350 Arduino  
 
@@ -685,9 +685,10 @@ Conversion from float [-1.0, +1.0]:
 
 ### Clock Specifications
 
-- **System Clock:** set by Arduino Tools → CPU Speed (240 MHz recommended); not overridden in code
+- **System Clock:** set by Arduino Tools → CPU Speed (250 MHz recommended); not overridden in code
 - **MCLK/SCKI (PCM1808):** PWM divider chosen at boot for the closest 256/384/512·fs ratio —
-  240 MHz / 13 = 18.46 MHz = 384.6·fs (+0.16 %); 150 MHz / 12 = 12.5 MHz (+1.7 %)
+  250 MHz / 20 = 12.5 MHz = 260.4·fs (+1.7 %); 240 MHz / 13 = 18.46 MHz = 384.6·fs (+0.16 %);
+  150 MHz / 12 = 12.5 MHz (+1.7 %)
 - **LRCK (word select):** 48 kHz (exact)
 - **BCK (bit clock):** 3.072 MHz (48 kHz × 64 bits/frame)
 
@@ -776,11 +777,11 @@ For best performance on Cortex-M33:
 
 ---
 
-## 10. Performance Characteristics (RP2350 @ 240 MHz)
+## 10. Performance Characteristics (RP2350 @ 250 MHz)
 
 Measured as Cortex-M33 instructions per sample in QEMU (`-O2`, hot code in SRAM). Arm doesn't
 publish M33 FPU cycle timings, so the cycles column is a *pessimistic* bound (VFMA 3 cycles,
-VLDR 2, VDIV 14). Real cost is between the two. Budget: 240 MHz / 48 kHz = **5000 cycles per
+VLDR 2, VDIV 14). Real cost is between the two. Budget: 250 MHz / 48 kHz = **5208 cycles per
 sample per core**.
 
 | Effect (core 0) | Instructions | Pessimistic cycles |
