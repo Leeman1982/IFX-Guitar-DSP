@@ -107,6 +107,9 @@ static volatile uint32_t g_bfLen  = AUDIO_BUFFER_FRAMES;
 static int g_bell = -1;
 
 static void __not_in_flash_func(core1_bell_irq)(void) {
+    /* All doorbells share one IRQ line, and the arduino-pico core uses one
+     * of them itself (flash-safe idling) — only act on ours. */
+    if (g_bell < 0 || !multicore_doorbell_is_set_current_core((uint)g_bell)) return;
     multicore_doorbell_clear_current_core((uint)g_bell);
     uint32_t id = g_bfReq;
     if (id == g_bfDone) return;
@@ -258,10 +261,11 @@ void setup1() {
      * until then core 0 renders the boost itself (g_bell < 0). */
     dwt_enable();
     int bell = multicore_doorbell_claim_unused((1u << 0) | (1u << 1), true);
-    irq_set_exclusive_handler(SIO_IRQ_BELL, core1_bell_irq);
-    irq_set_enabled(SIO_IRQ_BELL, true);
-    __asm volatile ("dmb sy" ::: "memory");
+    uint bellIrq = multicore_doorbell_irq_num((uint)bell);
+    irq_add_shared_handler(bellIrq, core1_bell_irq, PICO_SHARED_IRQ_HANDLER_DEFAULT_ORDER_PRIORITY);
+    irq_set_enabled(bellIrq, true);
     g_bfDone = g_bfReq;           /* empty pipeline */
+    __asm volatile ("dmb sy" ::: "memory");
     g_bell = bell;
 
     delay(300);   /* let Core 0 bring up audio before I2C init */

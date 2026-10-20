@@ -13,6 +13,13 @@
  *   Knob slots: 0 = Drive, 1 = Tone, 2 = spare.
  */
 #include "ifx_bf_models.h"
+
+/* Oversampling for the two Fuzz Face models (2 or 4).  Silicon fuzz edges
+ * are fast enough that 4× audibly reduces aliasing on hot settings, but it
+ * roughly doubles their CPU cost — enable only if the core-1 meter allows. */
+#ifndef BF_FUZZ_OSFACTOR
+#define BF_FUZZ_OSFACTOR 2
+#endif
 #include <stddef.h>
 
 #define R_(a,b,v)        { BF_E_R,     a, b, 0, 0, 0, (float)(v) }
@@ -535,10 +542,10 @@ const bf_model_desc BF_MODELS[BF_MODEL_COUNT] = {
       2, 2, { "Stock", "Mids" }, "Sustain", "Tone", 0.4955f /* -6.1 dB */, 0.6f, 0.5f, bmp_map },
 
     { "FUZZFACE Ge", 2, { { &FF_GE_NL, 1, 0, NO_RAIL }, { &FF_OUT_NL, 0, 0, NO_RAIL } },
-      2, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.1220f /* +1.0 dB */, 0.6f, 1.0f, ff_map },
+      BF_FUZZ_OSFACTOR, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.1220f /* +1.0 dB */, 0.6f, 1.0f, ff_map },
 
     { "FUZZFACE Si", 2, { { &FF_SI_NL, 1, 0, NO_RAIL }, { &FF_OUT_NL, 0, 0, NO_RAIL } },
-      2, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.2882f /* +2.2 dB */, 0.6f, 1.0f, ff_map },
+      BF_FUZZ_OSFACTOR, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.2882f /* +2.2 dB */, 0.6f, 1.0f, ff_map },
 
     { "RANGEMSTR", 1, { { &RM_NL, 1, 0, NO_RAIL } },
       2, 3, { "Single", "Humbck", "Buffer" }, "Input", "Gtr Vol", 0.6683f /* -3.5 dB */, 0.6f, 1.0f, rm_map },

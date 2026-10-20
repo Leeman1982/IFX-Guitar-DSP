@@ -524,6 +524,11 @@ static int IFX_RAMFUNC(newton)(const bf_dk *dk, const float *p, float *v, float 
     }
 }
 
+/* Iteration cap.  Almost every sample converges in 1–2 steps; the cap only
+ * matters on hard switching edges (fuzz transistors snapping between cutoff
+ * and saturation), where 6 was measurably too few (one-sample spikes). */
+#define BF_NEWTON_MAXIT 12
+
 /* ---- Specialised Newton for the common 2- and 4-port cases --------------
  * Same maths as newton() above, fully unrolled.  Diode pairs only evaluate
  * the branch matching the sign of v: the other branch carries ≤ Is (nA). */
@@ -556,7 +561,7 @@ static void IFX_RAMFUNC(newton2)(const bf_dk *dk, const float *p, float *v, floa
     const float K00 = dk->K[0][0], K01 = dk->K[0][1], K10 = dk->K[1][0], K11 = dk->K[1][1];
     const bool bjt = dk->port[0].type == BF_PORT_BJT_BE;
     float v0 = v[0], v1 = v[1], i0 = 0, i1 = 0, J00 = 0, J01 = 0, J10 = 0, J11 = 0, d0 = 0, d1 = 0;
-    for (int it = 0; it < 6; it++) {
+    for (int it = 0; it < BF_NEWTON_MAXIT; it++) {
         if (bjt) bjt_eval(&dk->port[0], v0, v1, &i0, &i1, &J00, &J01, &J10, &J11);
         else { port1_eval(&dk->port[0], v0, &i0, &J00); port1_eval(&dk->port[1], v1, &i1, &J11); }
         float F0 = v0 - p[0] + K00 * i0 + K01 * i1;
@@ -581,7 +586,7 @@ static void IFX_RAMFUNC(newton4)(const bf_dk *dk, const float *p, float *v, floa
     float a00 = 0, a01 = 0, a10 = 0, a11 = 0;     /* Q1 block */
     float b00 = 0, b01 = 0, b10 = 0, b11 = 0;     /* Q2 block */
     float ii[4] = { 0, 0, 0, 0 }, d[4] = { 0, 0, 0, 0 };
-    for (int it = 0; it < 6; it++) {
+    for (int it = 0; it < BF_NEWTON_MAXIT; it++) {
         bjt_eval(&dk->port[0], v[0], v[1], &ii[0], &ii[1], &a00, &a01, &a10, &a11);
         bjt_eval(&dk->port[2], v[2], v[3], &ii[2], &ii[3], &b00, &b01, &b10, &b11);
         /* M = I + K·J in 2×2 blocks [[A B][C D]] (J is block-diagonal), solved
@@ -679,7 +684,7 @@ static inline void solve_ports(const bf_dk *dk, bf_dk_state *st, float *z, int n
     if (P == 2)      newton2(dk, p, v, i);
     else if (P == 4 && dk->port[0].type == BF_PORT_BJT_BE && dk->port[2].type == BF_PORT_BJT_BE)
                      newton4(dk, p, v, i);
-    else             newton(dk, p, v, i, 6);
+    else             newton(dk, p, v, i, BF_NEWTON_MAXIT);
     for (int j = 0; j < P; j++) {
         if (v[j] != v[j]) { v[j] = 0.0f; i[j] = 0.0f; }   /* NaN guard */
         st->v[j] = v[j];
