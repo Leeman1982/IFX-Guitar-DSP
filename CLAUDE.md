@@ -1,7 +1,7 @@
 # IFX Guitar DSP Algorithms — Professional Audio Processing Library
 
 **Project:** ZOMBI SS Multi-Effect DSP Unit  
-**Platform:** RP2350 (dual-core ARM Cortex-M33) @ 150 MHz  
+**Platform:** RP2350 (dual-core ARM Cortex-M33) @ 240 MHz (Arduino Tools → CPU Speed)  
 **Audio:** 48 kHz, 24-bit I2S I/O  
 **Original DSP:** Philip Salmony (@phils-lab.net) — ported to RP2350 Arduino  
 
@@ -14,7 +14,9 @@ This document describes every effect algorithm, filter design, and coefficient t
 ```
 Guitar Input (PCM1808 ADC, 24-bit I2S)
     ↓
-[TS Boost] → [Noise Gate] → [Overdrive] → [10-Band EQ] → [Chorus] → [Delay]
+[Boost Factory]  ← core 1 (doorbell IRQ, one block ahead)
+    ↓
+[Noise Gate] → [Overdrive] → [10-Band EQ] → [Chorus] → [Delay]   ← core 0 (DMA IRQ)
     ↓
 Master Volume Smoother (prevents clicks)
     ↓
@@ -22,110 +24,45 @@ Output (PCM5102 DAC, 24-bit I2S, mono → stereo L/R)
 ```
 
 **Sample Rate:** 48 kHz  
-**Buffer Size:** 64 frames per half-buffer = ~1.33 ms latency  
+**Buffer Size:** 64 frames per half-buffer = ~1.33 ms (+1 block for the core-1 Boost Factory pipeline)  
 **Signal Format:** Float [-1.0, +1.0] between effects
 
 ---
 
-## 1. TS Boost (Tube Screamer Style)
+## 1. Boost Factory (circuit-modelled boost / overdrive / distortion / fuzz)
 
-### Algorithm
-A Tube Screamer (TS-808/TS-9) emulation producing the classic "mid-hump" overdrive tone.
+Replaces the former single-curve TS Boost. **Full documentation:
+[`firmware/ZombiSS_MultiEffect/BOOST_FACTORY.md`](firmware/ZombiSS_MultiEffect/BOOST_FACTORY.md).**
 
-**Signal Flow:**
-```
-Input → [1st-Order HPF @ ~720 Hz] → [Padé Tanh Clipper] → [1st-Order LPF Tone] → [Level] → Output
-```
+Nine pedals are simulated at component level from their schematics:
+- TS-808, Klon Centaur, MXR Distortion+ / DOD 250, ProCo RAT / Turbo RAT, Boss DS-1;
+- Big Muff Pi;
+- Fuzz Face in germanium and silicon versions, and the Rangemaster (both with a pickup and
+  guitar-volume model).
 
-The key TS character: bass-heavy signals are **not** clipped (HPF removes bass before clipping), only mids/highs are clipped, creating the signature mid-frequency emphasis.
+How the engine works:
+- Each pedal is a netlist in `ifx_bf_models.c`.
+- `ifx_bf_circuit.c` turns it into a discrete state-space model with nonlinear device ports
+  (nodal DK method, trapezoidal discretisation).
+- Diode pairs are solved in closed form (Wright omega). Ebers–Moll transistors use Newton
+  with SPICE `pnjlim` limiting.
+- Clipping stages are oversampled 2×/4× with polyphase IIR half-bands.
+- Every stage is validated against ngspice (`tools/boost_factory/`).
 
-### Filter Design: Bilinear 1st-Order
-
-Both HPF and LPF use the same bilinear transformation:
-
-```
-Given target cutoff frequency fc and sample time T = 1/fs:
-k = 2π × fc × T
-
-HPF Coefficients:
-  b0 =  2.0 / (2 + k)
-  b1 = -2.0 / (2 + k)
-  a1 = (2 - k) / (2 + k)
-
-LPF Coefficients:
-  b0 = k / (2 + k)
-  b1 = k / (2 + k)
-  a1 = (k - 2) / (2 + k)
-
-Difference Equation (both):
-  y[n] = b0·x[n] + b1·x[n-1] - a1·y[n-1]
-```
-
-### Fixed Frequencies
-- **HPF (input):** 720 Hz (removes bass before clipping)
-- **LPF (tone default):** 2200 Hz (mid-point of tone control range)
-
-### Tone Control Parameter
-Maps the **Tone** parameter (0.0–1.0) to LPF cutoff:
-```
-fc_tone = 500 Hz + (tone × 4500 Hz)
-Range: 500 Hz (dark) → 5000 Hz (bright)
-```
-
-### Soft-Clip Function: Padé Approximant of tanh
-
-Instead of expensive `tanhf()` library call, uses Padé approximation:
-```
-x = Drive × hpf_output
-if |x| ≥ 3:
-    clipped = sign(x)  // Clamped to ±1 (tanh(3) ≈ 0.9951)
-else:
-    clipped = x·(27 + x²) / (27 + 9x²)
-```
-
-**Accuracy:** <1% error for |x| < 3  
-**Speed:** ~5–10× faster than libm `tanhf()` on Cortex-M33
-
-This approximates the dual silicon-diode clipper in the real TS-808 pedal.
-
-### Parameters
-
-| Name   | Range      | Unit | Description |
-|--------|-----------|------|-------------|
-| Drive  | 1–100     | —    | Gain into clipper (1=almost no clipping, 100=aggressive) |
-| Tone   | 0.0–1.0   | —    | LPF cutoff map (0=dark/500Hz, 1=bright/5kHz) |
-| Level  | 0.0–2.0   | —    | Output volume (0=muted, 1=unity, 2=doubled) |
-
-### Default Initialization (48 kHz)
-```c
-drive = 10.0f
-level = 0.8f
-tone → fc = 2200 Hz (mid-point)
-```
-
-### C-Style Integration
+| Param | Range | Notes |
+|-------|-------|-------|
+| Model | 0–8 (enum) | name shown on OLED; `~` suffix = CPU fallback (1× rendering) |
+| Voice | per model (enum) | diode swaps (Si / Asym / LED / Ge), Big Muff mids, pickup type |
+| Drive | 0–10 | the pedal's gain/distortion/sustain/fuzz pot (real taper) |
+| Tone | 0–10 | tone/filter/treble pot; guitar volume on the fuzz models |
+| Level | −30…+12 dB | digital output trim (models are loudness-matched) |
 
 ```c
-// Header
-typedef struct {
-    float T;  // = 1/sampleRate
-    // HPF state
-    float hpf_b0, hpf_b1, hpf_a1;
-    float hpf_x1, hpf_y1;
-    // Drive
-    float drive;
-    // LPF state
-    float lpf_b0, lpf_b1, lpf_a1;
-    float lpf_x1, lpf_y1;
-    // Output
-    float level;
-} IFX_TSBoost;
-
-void IFX_TSBoost_Init(IFX_TSBoost *ts, float sampleRate_Hz);
-void IFX_TSBoost_SetDrive(IFX_TSBoost *ts, float drive);
-void IFX_TSBoost_SetTone(IFX_TSBoost *ts, float tone_0to1);
-void IFX_TSBoost_SetLevel(IFX_TSBoost *ts, float level);
-float IFX_TSBoost_Update(IFX_TSBoost *ts, float inp);
+IFX_BF_Init(&bf, 48000.0f);            /* builds model 0 */
+IFX_BF_SetModel(&bf, 3);               /* UI core */
+IFX_BF_SetDrive(&bf, 0.6f);            /* 0..1 */
+IFX_BF_Service(&bf);                   /* UI core: rebuild matrices, publish */
+IFX_BF_Process(&bf, buf, 64);          /* audio core: in-place block */
 ```
 
 ---
@@ -558,14 +495,18 @@ Two independent delay lines with separate:
 
 ### Delay Line Implementation
 
-Each delay line is a **circular buffer** with time-varying read pointer:
+Both voices read **one shared circular buffer** (2048 samples) at a fractional, sinusoidally
+modulated delay with linear interpolation:
 
 ```c
-// Fractional delay using linear interpolation
-float readIndex = (writeIndex - baseDelayLength - depth·sin(2π·rate·time)) % bufferLength;
-float frac = readIndex - floor(readIndex);
-float delayed = buffer[floor(readIndex)] + frac × (buffer[ceil(readIndex)] - buffer[floor(readIndex)]);
+d = base + depth · sin(2π · phase);      // phase: accumulator, += rate/fs per sample
+rp = writeIndex − d  (wrapped);           // fractional read position
+y = buf[i0] + frac · (buf[i0+1] − buf[i0]);
 ```
+
+The LFO is a phase accumulator with a 7th-order polynomial sine (|err| < 1e-4), so there is
+no `sinf()` per sample. (Before the optimisation pass the chorus modulated the buffer's
+*wrap length* instead, which clicked whenever the length changed.)
 
 ### Parameters
 
@@ -592,28 +533,20 @@ mix = 0.5
 ### Memory Usage
 
 ```
-2 delay lines × 2048 samples = 4096 floats = 16 KB
+1 shared delay line × 2048 samples = 8 KB
 ```
 
 ### C-Style Integration
 
 ```c
 typedef struct {
-    float delayLineA[2048], delayLineB[2048];
-    uint16_t delayLineBaseLengthA, delayLineBaseLengthB;
-    uint16_t delayLineLengthA, delayLineLengthB;
-    uint16_t delayLineIndexA, delayLineIndexB;
-    
-    float depthA, depthB;
-    float rateA, rateB;
-    float gainA, gainB;
-    float mix;
-    
-    float sampleTime;
-    float timeA, timeB;
-    float periodA, periodB;  // 1/rate
-    
-    float out;
+    float delayLine[2048];        /* shared by both voices */
+    uint16_t writeIndex;
+    float baseA, baseB;           /* base delay, samples   */
+    float depthA, depthB;         /* LFO depth, samples    */
+    float rateA, rateB, incA, incB, phaseA, phaseB;
+    float gainA, gainB, mix;
+    float sampleRate, out;
 } IFX_Chorus;
 
 void IFX_Chorus_Init(IFX_Chorus *cho,
@@ -752,8 +685,9 @@ Conversion from float [-1.0, +1.0]:
 
 ### Clock Specifications
 
-- **System Clock:** 150 MHz (RP2350)
-- **MCLK/SCKI (PCM1808):** 12.5 MHz (150 MHz / 12 via PWM)
+- **System Clock:** set by Arduino Tools → CPU Speed (240 MHz recommended); not overridden in code
+- **MCLK/SCKI (PCM1808):** PWM divider chosen at boot for the closest 256/384/512·fs ratio —
+  240 MHz / 13 = 18.46 MHz = 384.6·fs (+0.16 %); 150 MHz / 12 = 12.5 MHz (+1.7 %)
 - **LRCK (word select):** 48 kHz (exact)
 - **BCK (bit clock):** 3.072 MHz (48 kHz × 64 bits/frame)
 
@@ -771,7 +705,7 @@ Conversion from float [-1.0, +1.0]:
 ### Pseudocode Integration
 
 ```c
-#include "ifx_tsboost.h"
+#include "ifx_boost_factory.h"
 #include "ifx_noisegate.h"
 #include "ifx_overdrive.h"
 #include "ifx_10band_eq.h"
@@ -779,7 +713,7 @@ Conversion from float [-1.0, +1.0]:
 #include "ifx_delay.h"
 
 // Initialize all effects (sample rate = 48000 Hz)
-IFX_TSBoost tsboost;
+IFX_BoostFactory boost;
 IFX_NoiseGate noisegate;
 IFX_Overdrive overdrive;
 IFX_10BandEQ eq;
@@ -787,7 +721,7 @@ IFX_Chorus chorus;
 IFX_Delay delay;
 
 void init_effects(void) {
-    IFX_TSBoost_Init(&tsboost, 48000.0f);
+    IFX_BF_Init(&boost, 48000.0f);          /* TS808 model by default */
     IFX_NoiseGate_Init(&noisegate, 0.1f, 2.0f, 2.0f, 20.0f, 48000.0f);
     IFX_Overdrive_Init(&overdrive, 48000.0f, 150.0f, 40.0f, 5000.0f, 1.0f);
     IFX_10BandEQ_Init(&eq, 48000.0f);
@@ -801,7 +735,8 @@ float process_sample(float input) {
     float sig = input;
     
     // Optional: enable/disable per effect
-    sig = IFX_TSBoost_Update(&tsboost, sig);
+    /* Boost Factory is block-based: run IFX_BF_Process(&boost, buf, n) on the
+     * whole block before this per-sample loop (see ProcessBlock in effect_chain.c) */
     sig = IFX_NoiseGate_Update(&noisegate, sig);
     sig = IFX_Overdrive_Update(&overdrive, sig);
     sig = IFX_10BandEQ_Update(&eq, sig);
@@ -816,8 +751,8 @@ float process_sample(float input) {
 }
 
 // Real-time parameter adjustment
-void set_ts_boost_tone(float tone_0to1) {
-    IFX_TSBoost_SetTone(&tsboost, tone_0to1);
+void set_boost_tone(float tone_0to1) {
+    IFX_BF_SetTone(&boost, tone_0to1);     /* then IFX_BF_Service() on the UI core */
 }
 
 void set_overdrive_gain(float gain_1to200) {
@@ -841,24 +776,35 @@ For best performance on Cortex-M33:
 
 ---
 
-## 10. Performance Characteristics (RP2350 @ 150 MHz)
+## 10. Performance Characteristics (RP2350 @ 240 MHz)
 
-Measured CPU cycles per sample at 48 kHz (64-sample buffers):
+Measured as Cortex-M33 instructions per sample in QEMU (`-O2`, hot code in SRAM). Arm doesn't
+publish M33 FPU cycle timings, so the cycles column is a *pessimistic* bound (VFMA 3 cycles,
+VLDR 2, VDIV 14). Real cost is between the two. Budget: 240 MHz / 48 kHz = **5000 cycles per
+sample per core**.
 
-| Effect | Cycles/Sample |
-|--------|---|
-| TS Boost | ~12 |
-| Noise Gate | ~18 |
-| Overdrive | ~45 |
-| 10-Band EQ | ~35 |
-| Chorus | ~25 |
-| Delay | ~8 |
-| **Total Chain** | **~145 cycles/sample** |
+| Effect (core 0) | Instructions | Pessimistic cycles |
+|-----------------|--------------|--------------------|
+| Noise gate + overdrive + 10-band EQ + chorus + delay (all on) | ~850 | ~2180 |
 
-**Available per sample:** 150×10⁶ / 48×10³ ≈ 3125 cycles  
-**Headroom:** >20× available
+| Boost Factory model (core 1) | Instructions | Pessimistic cycles |
+|-----------------------------|--------------|--------------------|
+| TS808 / KLON / DIST+ / RAT / RANGEMSTR | 940–1090 | 2280–3160 |
+| DS-1 | 1340 | 3560 |
+| FUZZFACE Ge / Si | 2080 / 1870 | 4730 / 4770 |
+| BIG MUFF | 2280 | 5400 |
 
-Comfortable margin for UI updates, I2S DMA management, and encoder polling on the same core.
+The firmware measures its own load with the DWT cycle counter on both cores (OLED chain view
+and serial). If the Boost Factory keeps core 1 above 90 %, it falls back to 1× rendering for
+the current model.
+
+Optimisation-pass changes:
+- the whole chain is block-based, with hot code in SRAM;
+- overdrive: folded symmetric FIR (35 MACs instead of 69), coefficients precomputed, fast exp;
+- EQ: normalised TDF-II biquads with 0 dB bands skipped — measured closer to a double-precision
+  reference than the old DF-I;
+- moving-RMS drift fixed;
+- chorus rewritten (see §5).
 
 ---
 

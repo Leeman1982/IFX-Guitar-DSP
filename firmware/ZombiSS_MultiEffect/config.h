@@ -93,4 +93,11 @@
 #warning "CPU Speed below 200 MHz: select 240 MHz in Tools > CPU Speed for the Boost Factory fuzz models"
 #endif
 
+/* ===== Boost Factory ===== */
+/* Oversampling of the two Fuzz Face models: 2 (default) or 4.  Silicon fuzz
+ * edges are fast enough that 4× audibly reduces aliasing on hot settings,
+ * but it roughly doubles their CPU cost — raise it only if the core-1 load
+ * shown on the OLED / serial monitor stays well under ~45 % at 2×. */
+#define BF_FUZZ_OSFACTOR      2
+
 #endif /* CONFIG_H */

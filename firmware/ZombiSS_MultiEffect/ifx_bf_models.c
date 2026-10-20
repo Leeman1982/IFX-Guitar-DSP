@@ -13,10 +13,8 @@
  *   Knob slots: 0 = Drive, 1 = Tone, 2 = spare.
  */
 #include "ifx_bf_models.h"
+#include "config.h"          /* BF_FUZZ_OSFACTOR */
 
-/* Oversampling for the two Fuzz Face models (2 or 4).  Silicon fuzz edges
- * are fast enough that 4× audibly reduces aliasing on hot settings, but it
- * roughly doubles their CPU cost — enable only if the core-1 meter allows. */
 #ifndef BF_FUZZ_OSFACTOR
 #define BF_FUZZ_OSFACTOR 2
 #endif
