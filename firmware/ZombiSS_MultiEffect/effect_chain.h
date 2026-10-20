@@ -8,7 +8,7 @@
 extern "C" {
 #endif
 
-#include "ifx_tsboost.h"
+#include "ifx_boost_factory.h"
 #include "ifx_noisegate.h"
 #include "ifx_overdrive.h"
 #include "ifx_10band_eq.h"
@@ -16,7 +16,7 @@ extern "C" {
 #include "ifx_delay.h"
 
 /* ===== Effect indices (chain order) ===== */
-#define FX_TSBOOST     0   /* Tube Screamer boost  — footswitch FX1 */
+#define FX_BOOST       0   /* Boost Factory (9 circuit models) — footswitch FX1 */
 #define FX_NOISEGATE   1   /* Noise gate           — footswitch FX2 */
 #define FX_OVERDRIVE   2   /* Overdrive/distortion — footswitch FX3 */
 #define FX_EQ          3   /* 10-band graphic EQ   — footswitch FX4 */
@@ -26,11 +26,13 @@ extern "C" {
 
 #define SAMPLE_RATE_HZ 48000.0f
 
-/* TS Boost params */
-#define TS_DRIVE        0
-#define TS_TONE         1
-#define TS_LEVEL        2
-#define TS_PARAM_COUNT  3
+/* Boost Factory params */
+#define BF_MODEL        0   /* enum: pedal model                          */
+#define BF_VOICE        1   /* enum: per-model variant (diodes, pickup …) */
+#define BF_DRIVE        2   /* 0–10: drive/gain/fuzz/sustain pot          */
+#define BF_TONE         3   /* 0–10: tone/filter/treble/guitar volume     */
+#define BF_LEVEL        4   /* dB, output level                           */
+#define BF_PARAM_COUNT  5
 
 /* Noise Gate params */
 #define NG_THRESHOLD    0
@@ -88,10 +90,11 @@ typedef struct {
     float step;
     float value;
     const char *unit;
+    uint8_t isEnum;   /* value is an index: display via EffectChain_FormatValue */
 } ParamDesc;
 
 typedef struct {
-    IFX_TSBoost      tsboost;
+    IFX_BoostFactory boost;
     IFX_NoiseGate    noiseGate;
     IFX_Overdrive    overdrive;
     IFX_10BandEQ     eq;
@@ -107,7 +110,19 @@ typedef struct {
 } EffectChain;
 
 void  EffectChain_Init(EffectChain *ec);
-float EffectChain_Process(EffectChain *ec, float inp);
+/* Process n mono samples in place (n ≤ BF_BLOCK_MAX): Boost + Rest. */
+void  EffectChain_ProcessBlock(EffectChain *ec, float *buf, int n);
+/* The two halves separately, so they can run on different cores:
+ * Boost Factory (core 1, doorbell IRQ) and everything after it (core 0). */
+void  EffectChain_ProcessBoost(EffectChain *ec, float *buf, int n);
+void  EffectChain_ProcessRest(EffectChain *ec, float *buf, int n);
+/* CPU fallback for the Boost Factory (render at 1× instead of 2×/4×). */
+void  EffectChain_SetBoostLowCpu(EffectChain *ec, bool low);
+/* UI core: rebuild circuit models after parameter changes (call often). */
+void  EffectChain_Service(EffectChain *ec);
+/* Text for enum-valued params; returns false for plain numeric params. */
+bool  EffectChain_FormatValue(const EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex,
+                              char *buf, unsigned size);
 void  EffectChain_ToggleEffect(EffectChain *ec, uint8_t fxIndex);
 void  EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, float value);
 void  EffectChain_SetMasterVolume(EffectChain *ec, float vol);

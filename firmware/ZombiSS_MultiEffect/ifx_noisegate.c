@@ -1,4 +1,6 @@
+#pragma GCC optimize ("O2")
 #include "ifx_noisegate.h"
+#include "ifx_bf_math.h"   /* IFX_RAMFUNC */
 
 void IFX_NoiseGate_Init(IFX_NoiseGate *ng, float threshold, float attackTimeMs,
                          float releaseTimeMs, float holdTimeMs, float sampleRateHz) {
@@ -12,7 +14,7 @@ void IFX_NoiseGate_Init(IFX_NoiseGate *ng, float threshold, float attackTimeMs,
     IFX_MovingRMS_Init(&ng->mrms, (uint16_t)(sampleRateHz * IFX_NOISEGATE_RMS_HORIZON_MS * 0.001f));
 }
 
-float IFX_NoiseGate_Update(IFX_NoiseGate *ng, float inp) {
+float IFX_RAMFUNC(IFX_NoiseGate_Update)(IFX_NoiseGate *ng, float inp) {
     float inRMSSq = IFX_MovingRMS_Update(&ng->mrms, inp);
 
     float gain = 1.0f;
@@ -57,4 +59,8 @@ void IFX_NoiseGate_SetAttackRelease(IFX_NoiseGate *ng, float attackTimeMs,
 
 void IFX_NoiseGate_SetHoldTime(IFX_NoiseGate *ng, float holdTimeMs) {
     ng->holdTimeS = 0.001f * holdTimeMs;
+}
+
+void IFX_RAMFUNC(IFX_NoiseGate_Process)(IFX_NoiseGate *ng, float *buf, int n) {
+    for (int i = 0; i < n; i++) buf[i] = IFX_NoiseGate_Update(ng, buf[i]);
 }

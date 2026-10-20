@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 
+extern "C" uint8_t Audio_GetLoad0(void);
+extern "C" uint8_t Audio_GetLoad1(void);
+
 static void format_value(char *buf, size_t sz, float value, const char *unit) {
     if (value >= 1000.0f)      snprintf(buf, sz, "%.1fk%s", value / 1000.0f, unit);
     else if (value >= 100.0f)  snprintf(buf, sz, "%.0f%s", value, unit);
@@ -45,7 +48,10 @@ void UISystem::drawChainView() {
     if (_chainScrollOffset + maxVis < FX_COUNT)
         _oled->drawString(118, 1, "v", true);
 
-    _oled->drawString(0, 57, "Turn:Sel Push:Edit", false);
+    char foot[22];
+    /* DSP load: core 0 (chain) / core 1 (Boost Factory), % of block period */
+    snprintf(foot, sizeof(foot), "Push:Edit CPU%3u/%3u", Audio_GetLoad0(), Audio_GetLoad1());
+    _oled->drawString(0, 57, foot, false);
 
     _oled->flush();
 }
@@ -74,7 +80,8 @@ void UISystem::drawEffectParams() {
         _oled->drawString(2, y+1, p->name, sel);
 
         char val[16];
-        format_value(val, sizeof(val), p->value, p->unit);
+        if (!EffectChain_FormatValue(_chain, fx, pi, val, sizeof(val)))
+            format_value(val, sizeof(val), p->value, p->unit);
         int vx = 128 - ((int)strlen(val) * 6) - 2;
         _oled->drawString(vx, y+1, val, sel);
     }
@@ -97,11 +104,18 @@ void UISystem::drawParamEdit() {
     _oled->drawString(1, 1, header, true);
 
     char val[16];
-    format_value(val, sizeof(val), p->value, p->unit);
-    int tw = (int)strlen(val) * 12;
-    int tx = (128 - tw) / 2;
-    if (tx < 0) tx = 0;
-    _oled->drawStringLarge(tx, 16, val, false);
+    if (EffectChain_FormatValue(_chain, fx, pi, val, sizeof(val))) {
+        /* enum (model / voice names): may be too long for the 2× font */
+        int tw = (int)strlen(val) * 12;
+        if (tw <= 128) _oled->drawStringLarge((128 - tw) / 2, 16, val, false);
+        else           _oled->drawString((128 - (int)strlen(val) * 6) / 2, 20, val, false);
+    } else {
+        format_value(val, sizeof(val), p->value, p->unit);
+        int tw = (int)strlen(val) * 12;
+        int tx = (128 - tw) / 2;
+        if (tx < 0) tx = 0;
+        _oled->drawStringLarge(tx, 16, val, false);
+    }
 
     float frac = (p->value - p->min) / (p->max - p->min);
     _oled->drawProgressBar(4, 36, 120, 8, frac);
@@ -188,7 +202,7 @@ void UISystem::handleMasterVol(EncoderEvent evt) {
 
 void UISystem::handleFxToggle(EncoderEvent evt) {
     switch (evt) {
-    case ENC_EVENT_FX1_TOGGLE: EffectChain_ToggleEffect(_chain, FX_TSBOOST);   break;
+    case ENC_EVENT_FX1_TOGGLE: EffectChain_ToggleEffect(_chain, FX_BOOST);     break;
     case ENC_EVENT_FX2_TOGGLE: EffectChain_ToggleEffect(_chain, FX_NOISEGATE); break;
     case ENC_EVENT_FX3_TOGGLE: EffectChain_ToggleEffect(_chain, FX_OVERDRIVE); break;
     case ENC_EVENT_FX4_TOGGLE: EffectChain_ToggleEffect(_chain, FX_EQ);        break;
@@ -234,6 +248,13 @@ void UISystem::update() {
         case UI_SCREEN_MASTER_VOL:    handleMasterVol(evt); break;
         default: break;
         }
+    }
+
+    /* refresh the DSP-load readout on the chain view twice a second */
+    static uint32_t lastLoadDraw = 0;
+    if (_screen == UI_SCREEN_CHAIN_VIEW && millis() - lastLoadDraw > 500) {
+        lastLoadDraw = millis();
+        _needsRedraw = true;
     }
 
     if (_needsRedraw) {

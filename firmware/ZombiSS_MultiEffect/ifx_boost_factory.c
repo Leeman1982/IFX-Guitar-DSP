@@ -43,7 +43,7 @@ static inline float rail(float y, float lo, float hi) {
 }
 
 /* Op-amp slew-rate limit then output-swing limit, over a block. */
-static void post_block(const bf_stage_desc *sd, float *prev, float *x, int n, float dt) {
+static void IFX_RAMFUNC(post_block)(const bf_stage_desc *sd, float *prev, float *x, int n, float dt) {
     const bool hasSlew = sd->slew > 0.0f, hasRail = sd->railHi > sd->railLo;
     if (!hasSlew && !hasRail) return;
     const float dmax = sd->slew * dt;
@@ -93,7 +93,7 @@ static bool build_set(IFX_BoostFactory *bf, bf_coefset *cs, bool reset) {
         int s0 = s, s1 = s;
         while (s1 < md->nStages && md->st[s1].os) s1++;
         cs->nPre = (uint8_t)s0; cs->s0 = (uint8_t)s0; cs->s1 = (uint8_t)s1;
-        cs->osf = md->osFactor;
+        cs->osf = bf->osCap ? 1 : md->osFactor;
         /* a rail/slew on the last base-rate stage feeding the OS group is
          * applied after upsampling so that clipping is oversampled */
         cs->preRail = (s0 > 0 && s0 < s1) ? (uint8_t)(s0 - 1) : 0xFF;
@@ -107,7 +107,7 @@ static bool build_set(IFX_BoostFactory *bf, bf_coefset *cs, bool reset) {
         const bf_stage_desc *sd = &md->st[s];
         bf_netlist nl;
         netlist_for(md, s, &nl);
-        double T = 1.0 / ((double)bf->fs * (sd->os ? md->osFactor : 1));
+        double T = 1.0 / ((double)bf->fs * (sd->os ? cs->osf : 1));
         if (!bf_dk_build(&cs->dk[s], &nl, T, knobs)) return false;
         if (reset) {
             if (sd->os && !inOs) { inOs = true; uOsIn = u; }
@@ -153,6 +153,7 @@ void IFX_BF_SetModel(IFX_BoostFactory *bf, uint8_t model) {
     if (model >= BF_MODEL_COUNT) model = BF_MODEL_COUNT - 1;
     if (model != bf->model) {
         bf->model = model;
+        bf->osCap = 0;              /* every model starts at full quality */
         if (bf->voice >= BF_MODELS[model].nVoices) bf->voice = 0;
         bf->modelDirty = true;
         bf->dirty = true;
@@ -162,6 +163,16 @@ void IFX_BF_SetVoice(IFX_BoostFactory *bf, uint8_t v) {
     if (v >= BF_MODELS[bf->model].nVoices) v = BF_MODELS[bf->model].nVoices - 1;
     if (v != bf->voice) { bf->voice = v; bf->dirty = true; }
 }
+void IFX_BF_SetLowCpu(IFX_BoostFactory *bf, bool low) {
+    uint8_t v = low ? 1 : 0;
+    if (v != bf->osCap) {
+        bf->osCap = v;
+        bf->modelDirty = true;     /* new sample period → re-solve operating point */
+        bf->dirty = true;
+    }
+}
+bool IFX_BF_IsLowCpu(const IFX_BoostFactory *bf) { return bf->osCap != 0; }
+
 void IFX_BF_SetDrive(IFX_BoostFactory *bf, float d) { bf->drive = d; bf->dirty = true; }
 void IFX_BF_SetTone(IFX_BoostFactory *bf, float t)  { bf->tone = t;  bf->dirty = true; }
 void IFX_BF_SetLevelDb(IFX_BoostFactory *bf, float dB) {
@@ -192,7 +203,7 @@ void IFX_BF_Reset(IFX_BoostFactory *bf) {
     bf->fade = 0.0f;
 }
 
-static void upsample(bf_halfband *h0, bf_halfband *h1, int osf,
+static void IFX_RAMFUNC(upsample)(bf_halfband *h0, bf_halfband *h1, int osf,
                      const float *in, float *out, int n) {
     if (osf == 4) {
         for (int i = 0; i < n; i++) {
@@ -207,7 +218,7 @@ static void upsample(bf_halfband *h0, bf_halfband *h1, int osf,
     }
 }
 
-static void downsample(bf_halfband *h0, bf_halfband *h1, int osf,
+static void IFX_RAMFUNC(downsample)(bf_halfband *h0, bf_halfband *h1, int osf,
                        const float *in, float *out, int n) {
     if (osf == 4) {
         for (int i = 0; i < n; i++) {
@@ -244,8 +255,15 @@ void IFX_RAMFUNC(IFX_BF_Process)(IFX_BoostFactory *bf, float *buf, int n) {
         bf_dk_block(&cs->dk[s], &bf->st[s], buf, md->st[s].aux ? bf->in1 : 0, n);
         if (s != cs->preRail) post_block(&md->st[s], &bf->slew[s], buf, n, dt1);
     }
-    /* oversampled group */
-    if (cs->s1 > cs->s0) {
+    /* oversampled group (or the same stages at base rate in low-CPU mode) */
+    if (cs->s1 > cs->s0 && osf == 1) {
+        if (cs->preRail != 0xFF)
+            post_block(&md->st[cs->preRail], &bf->slew[cs->preRail], buf, n, dt1);
+        for (int s = cs->s0; s < cs->s1; s++) {
+            bf_dk_block(&cs->dk[s], &bf->st[s], buf, md->st[s].aux ? bf->in1 : 0, n);
+            post_block(&md->st[s], &bf->slew[s], buf, n, dt1);
+        }
+    } else if (cs->s1 > cs->s0) {
         const int no = n * osf;
         upsample(&bf->up0, &bf->up1, osf, buf, bf->os, n);
         if (cs->auxOs) upsample(&bf->ua0, &bf->ua1, osf, bf->in1, bf->osAux, n);

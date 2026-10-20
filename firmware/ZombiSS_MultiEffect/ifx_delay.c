@@ -1,4 +1,6 @@
+#pragma GCC optimize ("O2")
 #include "ifx_delay.h"
+#include "ifx_bf_math.h"   /* IFX_RAMFUNC */
 
 void IFX_Delay_Init(IFX_Delay *dly, float delayTime_ms, float mix, float feedback, float sampleRate_Hz) {
     IFX_Delay_SetLength(dly, delayTime_ms, sampleRate_Hz);
@@ -11,7 +13,7 @@ void IFX_Delay_Init(IFX_Delay *dly, float delayTime_ms, float mix, float feedbac
     dly->out = 0.0f;
 }
 
-float IFX_Delay_Update(IFX_Delay *dly, float inp) {
+float IFX_RAMFUNC(IFX_Delay_Update)(IFX_Delay *dly, float inp) {
     float delayLineOutput = dly->line[dly->lineIndex];
     float delayLineInput  = inp + dly->feedback * delayLineOutput;
     dly->line[dly->lineIndex] = delayLineInput;
@@ -45,4 +47,8 @@ void IFX_Delay_SetFeedback(IFX_Delay *dly, float feedback) {
     if (feedback > 0.99f) feedback = 0.99f;
     if (feedback < 0.0f) feedback = 0.0f;
     dly->feedback = feedback;
+}
+
+void IFX_RAMFUNC(IFX_Delay_Process)(IFX_Delay *dly, float *buf, int n) {
+    for (int i = 0; i < n; i++) buf[i] = IFX_Delay_Update(dly, buf[i]);
 }

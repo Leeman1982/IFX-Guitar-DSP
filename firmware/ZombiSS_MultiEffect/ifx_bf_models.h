@@ -38,6 +38,7 @@ typedef struct {
     const char *voice[4];
     const char *driveLabel, *toneLabel;
     float makeup;                /* output volts → nominal level         */
+    float defDrive, defTone;     /* knob positions loaded on model select */
     /* maps UI → pot rotations + digital input gain; patches netlist copies
      * for the selected voice (diodes, caps, pickup) */
     void (*map)(const bf_ui *ui, float *knobs, float *inGain,

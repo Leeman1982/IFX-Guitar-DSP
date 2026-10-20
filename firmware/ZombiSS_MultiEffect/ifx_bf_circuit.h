@@ -98,6 +98,7 @@ typedef struct {
     /* BJT: Ebers-Moll parameters (BE port carries them; BC port is partner) */
     float Is, kF, kR, iaF, iaR;   /* kF = 1 + 1/βF, kR = 1 + 1/βR */
     float sgn;                    /* +1 NPN, −1 PNP */
+    float vcf, vcr;               /* SPICE pnjlim critical voltages (fwd/rev or BE/BC) */
 } bf_port;
 
 /* ---- Discrete state-space model (float, audio side) ---------------------

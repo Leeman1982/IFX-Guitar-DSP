@@ -17,32 +17,22 @@ extern float IFX_OD_LPF_INP_COEF[IFX_OVERDRIVE_LPF_INP_LENGTH];
 
 typedef struct {
     float T;
-
-    /* Input low-pass filter */
-    float   lpfInpBuf[IFX_OVERDRIVE_LPF_INP_LENGTH];
+    /* Input low-pass filter: doubled circular buffer so the 69-tap window is
+     * always contiguous (no modulo in the hot loop) */
+    float   lpfInpBuf[2 * IFX_OVERDRIVE_LPF_INP_LENGTH];
     uint8_t lpfInpBufIndex;
-    float   lpfInpOut;
-
-    /* Input high-pass filter */
-    float hpfInpBufIn[2];
-    float hpfInpBufOut[2];
-    float hpfInpWcT;
-    float hpfInpOut;
-
+    /* Input high-pass filter (1st-order bilinear): y = g·(x − x1) + a·y1 */
+    float hpfInpWcT, hpfG, hpfA, hpfX1, hpfY1;
     /* Overdrive settings */
     float preGain;
     float boostGain;
-    float threshold;
-
-    /* Output low-pass filter */
-    float lpfOutBufIn[3];
-    float lpfOutBufOut[3];
-    float lpfOutWcT;
-    float lpfOutDamp;
-    float lpfOutOut;
-
-    float out;
     float Q;
+    float clipOffset;          /* Q / (1 − e^{dQ}), recomputed in SetQ */
+    /* Output low-pass filter (2nd-order bilinear), coefficients precomputed */
+    float lpfOutWcT, lpfOutDamp;
+    float lpfB, lpfA1, lpfA2;
+    float lpfX1, lpfX2, lpfY1, lpfY2;
+    float out;
 } IFX_Overdrive;
 
 void  IFX_Overdrive_Init(IFX_Overdrive *od, float samplingFrequencyHz,
@@ -54,6 +44,8 @@ void  IFX_Overdrive_SetHPF(IFX_Overdrive *od, float hpfCutoffFrequencyHz);
 void  IFX_Overdrive_SetLPF(IFX_Overdrive *od, float lpfCutoffFrequencyHz, float lpfDamping);
 void  IFX_Overdrive_SetQ(IFX_Overdrive *od, float Q);
 float IFX_Overdrive_Update(IFX_Overdrive *od, float inp);
+/* Block form (audio core): in-place over n samples. */
+void  IFX_Overdrive_Process(IFX_Overdrive *od, float *buf, int n);
 
 #ifdef __cplusplus
 }

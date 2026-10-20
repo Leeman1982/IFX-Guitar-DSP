@@ -25,6 +25,8 @@ typedef struct {
 void  IFX_NoiseGate_Init(IFX_NoiseGate *ng, float threshold, float attackTimeMs,
                           float releaseTimeMs, float holdTimeMs, float sampleRateHz);
 float IFX_NoiseGate_Update(IFX_NoiseGate *ng, float inp);
+/* Block form (audio core): in-place over n samples. */
+void  IFX_NoiseGate_Process(IFX_NoiseGate *ng, float *buf, int n);
 void  IFX_NoiseGate_SetThreshold(IFX_NoiseGate *ng, float threshold);
 void  IFX_NoiseGate_SetAttackRelease(IFX_NoiseGate *ng, float attackTimeMs,
                                       float releaseTimeMs, float sampleRateHz);

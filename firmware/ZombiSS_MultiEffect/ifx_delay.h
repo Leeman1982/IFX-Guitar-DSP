@@ -21,6 +21,8 @@ typedef struct {
 
 void  IFX_Delay_Init(IFX_Delay *dly, float delayTime_ms, float mix, float feedback, float sampleRate_Hz);
 float IFX_Delay_Update(IFX_Delay *dly, float inp);
+/* Block form (audio core): in-place over n samples. */
+void  IFX_Delay_Process(IFX_Delay *dly, float *buf, int n);
 void  IFX_Delay_SetLength(IFX_Delay *dly, float delayTime_ms, float sampleRate_Hz);
 void  IFX_Delay_SetMix(IFX_Delay *dly, float mix);
 void  IFX_Delay_SetFeedback(IFX_Delay *dly, float feedback);

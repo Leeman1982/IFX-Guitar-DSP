@@ -60,6 +60,7 @@ typedef struct {
     float drive, tone;
     volatile bool dirty;
     bool modelDirty;
+    uint8_t osCap;        /* 0 = model default; 1 = force 1× (CPU fallback) */
 
     /* audio-core side */
     uint8_t  cur;
@@ -82,6 +83,10 @@ void  IFX_BF_SetDrive(IFX_BoostFactory *bf, float drive_0to1);
 void  IFX_BF_SetTone(IFX_BoostFactory *bf, float tone_0to1);
 void  IFX_BF_SetLevelDb(IFX_BoostFactory *bf, float dB);
 bool  IFX_BF_Service(IFX_BoostFactory *bf);          /* UI core            */
+/* CPU fallback (UI core): render the oversampled stages at 1× (true) or
+ * at the model's normal rate (false).  Takes effect via Service(). */
+void  IFX_BF_SetLowCpu(IFX_BoostFactory *bf, bool low);
+bool  IFX_BF_IsLowCpu(const IFX_BoostFactory *bf);
 /* Process n ≤ BF_BLOCK_MAX samples in place (audio core). */
 void  IFX_BF_Process(IFX_BoostFactory *bf, float *buf, int n);
 void  IFX_BF_Reset(IFX_BoostFactory *bf);            /* audio core: re-arm */

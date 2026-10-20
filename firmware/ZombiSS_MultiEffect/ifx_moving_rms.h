@@ -15,6 +15,7 @@ typedef struct {
     float invM;
     float in_sq_M[IFX_MOVING_RMS_MAX_BUF];
     float out_sq;
+    float fresh;      /* exact sum of the current window, rebuilt each wrap */
 } IFX_MovingRMS;
 
 void  IFX_MovingRMS_Init(IFX_MovingRMS *mrms, uint16_t M);

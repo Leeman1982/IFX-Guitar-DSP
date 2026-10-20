@@ -1,4 +1,6 @@
+#pragma GCC optimize ("O2")
 #include "ifx_10band_eq.h"
+#include "ifx_bf_math.h"   /* IFX_RAMFUNC */
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -47,10 +49,14 @@ void IFX_10BandEQ_SetBand(IFX_10BandEQ *eq, uint8_t band, float gainDb) {
     IFX_PeakingFilter_SetParameters(&eq->bands[band], fc, bw, db_to_linear(gainDb));
 }
 
-float IFX_10BandEQ_Update(IFX_10BandEQ *eq, float in) {
+float IFX_RAMFUNC(IFX_10BandEQ_Update)(IFX_10BandEQ *eq, float in) {
     float sig = in;
     for (uint8_t i = 0; i < EQ10_BANDS; i++) {
         sig = IFX_PeakingFilter_Update(&eq->bands[i], sig);
     }
     return sig;
+}
+
+void IFX_RAMFUNC(IFX_10BandEQ_Process)(IFX_10BandEQ *eq, float *buf, int n) {
+    for (int i = 0; i < n; i++) buf[i] = IFX_10BandEQ_Update(eq, buf[i]);
 }

@@ -50,8 +50,8 @@ Go to **Tools** menu and set the following:
 |---------|-------|
 | **Board** | `Raspberry Pi Pico 2` |
 | **Flash Size** | `4MB (no FS)` |
-| **CPU Speed** | `150 MHz` (or `133 MHz` if 150 is unavailable) |
-| **Optimize** | `Optimize Even More (-O2)` |
+| **CPU Speed** | `240 MHz (Overclock)` — required for the Boost Factory fuzz models; the firmware no longer forces a clock, so this menu setting is what runs |
+| **Optimize** | `Optimize Even More (-O2)` (the DSP files force `-O2` themselves, so `Small (-Os)` also works) |
 | **USB Stack** | `Pico SDK` |
 | **IP/Bluetooth Stack** | `IPv4 Only` |
 | **Upload Method** | `Default (UF2)` |
@@ -219,7 +219,7 @@ Each button: one leg to the MUX channel pin below, other leg to GND.
 
 | Channel | Function |
 |---------|----------|
-| CH0 | FX1 — TS Boost toggle |
+| CH0 | FX1 — Boost Factory toggle |
 | CH1 | FX2 — Noise Gate toggle |
 | CH2 | FX3 — Overdrive toggle |
 | CH3 | FX4 — EQ toggle |

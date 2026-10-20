@@ -6,38 +6,27 @@
 
 void IFX_PeakingFilter_Init(IFX_PeakingFilter *filt, float sampleRate_Hz) {
     filt->sampleTime_s = 1.0f / sampleRate_Hz;
-    for (uint8_t n = 0; n < 3; n++) {
-        filt->x[n] = 0.0f;
-        filt->y[n] = 0.0f;
-    }
+    filt->s1 = filt->s2 = 0.0f;
+    filt->unity = 1;
     IFX_PeakingFilter_SetParameters(filt, 1.0f, 0.0f, 1.0f);
 }
 
+/* Bilinear transform (pre-warped) of the analog peaking section
+ *   H(s) = (s² + G·(ω/Q)·s + ω²) / (s² + (ω/Q)·s + ω²)
+ * — same response as the original Phil's Lab implementation, just
+ * normalised once here instead of dividing on every sample. */
 void IFX_PeakingFilter_SetParameters(IFX_PeakingFilter *filt, float centerFrequency_Hz,
                                       float bandwidth_Hz, float boostCut_linear) {
     float wcT = 2.0f * tanf(M_PI * centerFrequency_Hz * filt->sampleTime_s);
     float Q = (centerFrequency_Hz > 0.001f) ? bandwidth_Hz / centerFrequency_Hz : 0.707f;
-
-    filt->a[0] = 4.0f + 2.0f * boostCut_linear * Q * wcT + wcT * wcT;
-    filt->a[1] = 2.0f * wcT * wcT - 8.0f;
-    filt->a[2] = 4.0f - 2.0f * boostCut_linear * Q * wcT + wcT * wcT;
-
-    float denom = 4.0f + 2.0f * Q * wcT + wcT * wcT;
-    filt->b[0] = 1.0f / denom;
-    filt->b[1] = -(2.0f * wcT * wcT - 8.0f);
-    filt->b[2] = -(4.0f - 2.0f * Q * wcT + wcT * wcT);
-}
-
-float IFX_PeakingFilter_Update(IFX_PeakingFilter *filt, float in) {
-    filt->x[2] = filt->x[1];
-    filt->x[1] = filt->x[0];
-    filt->x[0] = in;
-
-    filt->y[2] = filt->y[1];
-    filt->y[1] = filt->y[0];
-
-    filt->y[0] = (filt->a[0] * filt->x[0] + filt->a[1] * filt->x[1] + filt->a[2] * filt->x[2]
-               + filt->b[1] * filt->y[1] + filt->b[2] * filt->y[2]) * filt->b[0];
-
-    return filt->y[0];
+    float w2 = wcT * wcT;
+    float inv = 1.0f / (4.0f + 2.0f * Q * wcT + w2);
+    filt->b0 = (4.0f + 2.0f * boostCut_linear * Q * wcT + w2) * inv;
+    filt->b1 = (2.0f * w2 - 8.0f) * inv;
+    filt->b2 = (4.0f - 2.0f * boostCut_linear * Q * wcT + w2) * inv;
+    filt->a1 = filt->b1;
+    filt->a2 = (4.0f - 2.0f * Q * wcT + w2) * inv;
+    uint8_t unity = (boostCut_linear == 1.0f);
+    if (unity != filt->unity) filt->s1 = filt->s2 = 0.0f;   /* states were frozen */
+    filt->unity = unity;
 }

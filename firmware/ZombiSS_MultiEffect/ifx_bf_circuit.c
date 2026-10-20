@@ -176,10 +176,15 @@ static bool build_core(bf_dk *dk, const bf_netlist *nl, double T, const float *k
         case BF_E_C: case BF_E_L: {
             if (N >= BF_MAX_STATES) return false;
             bool isL = (el->kind == BF_E_L);
-            double g = isL ? T / (2.0 * el->value) : 2.0 * el->value / T;
+            /* aux2 = 1 on a capacitor: backward Euler instead of trapezoidal.
+             * Used for small device parasitics (junction capacitance) whose
+             * poles sit far above Nyquist, where the trapezoidal rule rings
+             * at fs/2 instead of damping them (it is A- but not L-stable). */
+            bool be = !isL && el->aux2 == 1;
+            double g = isL ? T / (2.0 * el->value) : (be ? 1.0 : 2.0) * el->value / T;
             stamp_g(el->n1, el->n2, g);
             in->stA[N] = ui(el->n1); in->stB[N] = ui(el->n2);
-            in->stG[N] = g; in->stInd[N] = isL;
+            in->stG[N] = g; in->stInd[N] = isL ? 1 : (be ? 2 : 0);
             N++;
         } break;
 
@@ -279,7 +284,7 @@ static bool build_core(bf_dk *dk, const bf_netlist *nl, double T, const float *k
     /* state history injection columns */
     for (int k = 0; k < N; k++) {
         int col = M + k;
-        double sgn = in->stInd[k] ? -1.0 : 1.0;   /* cap: +s into A; ind: −h */
+        double sgn = in->stInd[k] == 1 ? -1.0 : 1.0;   /* cap: +s into A; ind: −h */
         if (in->stA[k] >= 0) s_X[in->stA[k]][col] += sgn;
         if (in->stB[k] >= 0) s_X[in->stB[k]][col] -= sgn;
     }
@@ -311,7 +316,8 @@ static bool build_core(bf_dk *dk, const bf_netlist *nl, double T, const float *k
     }
     /* state rows: x' = 2G·v_cap ∓ x */
     for (int k = 0; k < N; k++) {
-        double g2 = 2.0 * in->stG[k];
+        /* trapezoidal: x' = 2G·v ∓ x ; backward Euler: x' = G·v */
+        double g2 = (in->stInd[k] == 2 ? 1.0 : 2.0) * in->stG[k];
         float *row = dk->Sm[k];
         for (int m = 0; m < M; m++) in->Vu[k][m] = row_diff(in->stA[k], in->stB[k], m);
         row[0]   = (float)(g2 * in->Vu[k][0]);
@@ -321,7 +327,7 @@ static bool build_core(bf_dk *dk, const bf_netlist *nl, double T, const float *k
             in->Vx[k][l] = row_diff(in->stA[k], in->stB[k], cS + l);
             row[zX + l] = (float)(g2 * in->Vx[k][l]);
         }
-        row[zX + k] += in->stInd[k] ? 1.0f : -1.0f;
+        if (in->stInd[k] != 2) row[zX + k] += in->stInd[k] ? 1.0f : -1.0f;
         for (int l = 0; l < P; l++) {
             in->Vi[k][l] = row_diff(in->stA[k], in->stB[k], cP + l);
             row[zI + l] = (float)(g2 * in->Vi[k][l]);
@@ -347,6 +353,12 @@ static bool build_core(bf_dk *dk, const bf_netlist *nl, double T, const float *k
         if (pt->type == BF_PORT_DPAIR || pt->type == BF_PORT_FA) {
             pt->iaf = 1.0f / pt->af;
             pt->iar = 1.0f / pt->ar;
+            pt->vcf = pt->Isf > 0.0f ? (float)(pt->af * log(pt->af / (1.41421356 * pt->Isf))) : 1e9f;
+            pt->vcr = pt->Isr > 0.0f ? (float)(pt->ar * log(pt->ar / (1.41421356 * pt->Isr))) : 1e9f;
+        } else {
+            double aF = 1.0 / pt->iaF, aR = 1.0 / pt->iaR;
+            pt->vcf = (float)(aF * log(aF / (1.41421356 * pt->Is)));
+            pt->vcr = (float)(aR * log(aR / (1.41421356 * pt->Is)));
         }
     }
     if (dk->solver == BF_SOLVE_CLOSED) {
@@ -378,7 +390,7 @@ static inline float wo_branch(float p, float K, float Is, float ia, float a, flo
     return q - a * w;
 }
 
-static inline float closed_form(const bf_dk *dk, float p) {
+static float IFX_RAMFUNC(closed_form)(const bf_dk *dk, float p) {
     const bf_port *pt = &dk->port[0];
     if (p >= 0.0f) {
         if (pt->Isf <= 0.0f) return p;
@@ -415,6 +427,37 @@ static inline void dev_eval(const bf_dk *dk, const float *v, float *i, float *J,
             j += 1;
         }
     }
+}
+
+/* SPICE pnjlim: compress forward-going junction steps logarithmically
+ * above the critical voltage; reverse-going steps are never limited. */
+static float IFX_RAMFUNC(pnjlim)(float vnew, float vold, float a, float vcrit) {
+    if (vnew > vcrit && fabsf(vnew - vold) > 2.0f * a) {
+        if (vold > 0.0f) {
+            float arg = 1.0f + (vnew - vold) / a;
+            vnew = arg > 0.0f ? vold + a * bf_log(arg) : vcrit;
+        } else {
+            vnew = a * bf_log(vnew / a);
+        }
+    }
+    return vnew;
+}
+
+/* Limited step for port j of a model (v = current port voltage).
+ * pnjlim only ever acts on steps larger than 2·a, so small (converging)
+ * steps — the overwhelmingly common case — return immediately. */
+static inline __attribute__((always_inline)) float lim_step(const bf_port *pt, float v, float d) {
+    if (fabsf(d) < 0.05f) return d;           /* < 2·a for every junction model */
+    float vn = v + d;
+    if (pt->type == BF_PORT_BJT_BE || pt->type == BF_PORT_BJT_BC) {
+        const float s = pt->sgn;
+        const bool be = pt->type == BF_PORT_BJT_BE;
+        float xo = s * v, xn = s * vn;
+        xn = pnjlim(xn, xo, be ? 1.0f / pt->iaF : 1.0f / pt->iaR, be ? pt->vcf : pt->vcr);
+        return s * xn - v;
+    }
+    if (vn >= 0.0f) return pnjlim(vn, v, pt->af, pt->vcf) - v;
+    return -pnjlim(-vn, -v, pt->ar, pt->vcr) - v;
 }
 
 /* Damped Newton on F(v) = v + K·i(v) − p for P ≤ 4 ports.
@@ -461,9 +504,7 @@ static int IFX_RAMFUNC(newton)(const bf_dk *dk, const float *p, float *v, float 
         for (int r = P - 1; r >= 0; r--) {
             float acc = M[r][P];
             for (int c = r + 1; c < P; c++) acc -= M[r][c] * d[c];
-            float s = acc * M[r][r];
-            if (s >  0.1f) s =  0.1f;           /* junction step limiting */
-            if (s < -0.1f) s = -0.1f;
+            float s = lim_step(&dk->port[r], v[r], acc * M[r][r]);
             d[r] = s;
             /* a non-conducting junction (tiny di/dv) can't move any current:
              * its voltage jitter at the float noise floor is irrelevant */
@@ -489,10 +530,10 @@ static int IFX_RAMFUNC(newton)(const bf_dk *dk, const float *p, float *v, float 
 
 static inline void port1_eval(const bf_port *pt, float v, float *i, float *g) {
     if (v >= 0.0f) {
-        float e = bf_exp(v * pt->iaf);
+        float e = pt->Isf > 0.0f ? bf_exp(v * pt->iaf) : 1.0f;
         *i = pt->Isf * (e - 1.0f);  *g = pt->Isf * e * pt->iaf;
     } else {
-        float e = bf_exp(-v * pt->iar);
+        float e = pt->Isr > 0.0f ? bf_exp(-v * pt->iar) : 1.0f;
         *i = -pt->Isr * (e - 1.0f); *g = pt->Isr * e * pt->iar;
     }
 }
@@ -510,11 +551,8 @@ static inline void bjt_eval(const bf_port *pt, float vbe, float vbc,
     *J00 = dF * pt->kF; *J01 = -dR; *J10 = -dF; *J11 = dR * pt->kR;
 }
 
-static inline float limstep(float d) {
-    return d > 0.1f ? 0.1f : (d < -0.1f ? -0.1f : d);
-}
 
-static inline void newton2(const bf_dk *dk, const float *p, float *v, float *i) {
+static void IFX_RAMFUNC(newton2)(const bf_dk *dk, const float *p, float *v, float *i) {
     const float K00 = dk->K[0][0], K01 = dk->K[0][1], K10 = dk->K[1][0], K11 = dk->K[1][1];
     const bool bjt = dk->port[0].type == BF_PORT_BJT_BE;
     float v0 = v[0], v1 = v[1], i0 = 0, i1 = 0, J00 = 0, J01 = 0, J10 = 0, J11 = 0, d0 = 0, d1 = 0;
@@ -526,8 +564,8 @@ static inline void newton2(const bf_dk *dk, const float *p, float *v, float *i) 
         float M00 = 1.0f + K00 * J00 + K01 * J10, M01 = K00 * J01 + K01 * J11;
         float M10 = K10 * J00 + K11 * J10,        M11 = 1.0f + K10 * J01 + K11 * J11;
         float inv = 1.0f / (M00 * M11 - M01 * M10);
-        d0 = limstep((M01 * F1 - M11 * F0) * inv);
-        d1 = limstep((M10 * F0 - M00 * F1) * inv);
+        d0 = lim_step(&dk->port[0], v0, (M01 * F1 - M11 * F0) * inv);
+        d1 = lim_step(&dk->port[1], v1, (M10 * F0 - M00 * F1) * inv);
         v0 += d0; v1 += d1;
         float a0 = J00 > 1e-6f ? fabsf(d0) : 0.0f, a1 = J11 > 1e-6f ? fabsf(d1) : 0.0f;
         if (a0 < 1e-4f && a1 < 1e-4f) break;
@@ -539,51 +577,51 @@ static inline void newton2(const bf_dk *dk, const float *p, float *v, float *i) 
 
 /* Two Ebers-Moll BJTs (ports 0-1 and 2-3): Fuzz Face.  The Jacobian is
  * block-diagonal (2×2 per transistor), so M = I + K·J needs 2 MACs/entry. */
-static inline void newton4(const bf_dk *dk, const float *p, float *v, float *i) {
+static void IFX_RAMFUNC(newton4)(const bf_dk *dk, const float *p, float *v, float *i) {
     float a00 = 0, a01 = 0, a10 = 0, a11 = 0;     /* Q1 block */
     float b00 = 0, b01 = 0, b10 = 0, b11 = 0;     /* Q2 block */
     float ii[4] = { 0, 0, 0, 0 }, d[4] = { 0, 0, 0, 0 };
     for (int it = 0; it < 6; it++) {
         bjt_eval(&dk->port[0], v[0], v[1], &ii[0], &ii[1], &a00, &a01, &a10, &a11);
         bjt_eval(&dk->port[2], v[2], v[3], &ii[2], &ii[3], &b00, &b01, &b10, &b11);
-        float M[4][5];
-        _Pragma("GCC unroll 4")
-        for (int j = 0; j < 4; j++) {
-            const float *K = dk->K[j];
-            M[j][4] = p[j] - v[j] - (K[0] * ii[0] + K[1] * ii[1] + K[2] * ii[2] + K[3] * ii[3]);
-            M[j][0] = K[0] * a00 + K[1] * a10;
-            M[j][1] = K[0] * a01 + K[1] * a11;
-            M[j][2] = K[2] * b00 + K[3] * b10;
-            M[j][3] = K[2] * b01 + K[3] * b11;
-        }
-        M[0][0] += 1.0f; M[1][1] += 1.0f; M[2][2] += 1.0f; M[3][3] += 1.0f;
-        _Pragma("GCC unroll 4")
-        for (int c = 0; c < 4; c++) {
-            int piv = c;
-            _Pragma("GCC unroll 4")
-            for (int r = c + 1; r < 4; r++) if (fabsf(M[r][c]) > fabsf(M[piv][c])) piv = r;
-            if (piv != c) {
-                _Pragma("GCC unroll 5")
-                for (int k = 0; k < 5; k++) { float t = M[c][k]; M[c][k] = M[piv][k]; M[piv][k] = t; }
-            }
-            float inv = 1.0f / M[c][c];
-            M[c][c] = inv;
-            _Pragma("GCC unroll 4")
-            for (int r = c + 1; r < 4; r++) {
-                float f = M[r][c] * inv;
-                _Pragma("GCC unroll 5")
-                for (int k = c + 1; k < 5; k++) M[r][k] -= f * M[c][k];
-            }
-        }
-        d[3] = limstep(M[3][4] * M[3][3]);
-        d[2] = limstep((M[2][4] - M[2][3] * d[3]) * M[2][2]);
-        d[1] = limstep((M[1][4] - M[1][2] * d[2] - M[1][3] * d[3]) * M[1][1]);
-        d[0] = limstep((M[0][4] - M[0][1] * d[1] - M[0][2] * d[2] - M[0][3] * d[3]) * M[0][0]);
+        /* M = I + K·J in 2×2 blocks [[A B][C D]] (J is block-diagonal), solved
+         * by Schur complement: two 2×2 inverses instead of a pivoted 4×4. */
+        const float (*K)[BF_MAX_PORTS] = dk->K;
+        float r[4];
+        for (int j = 0; j < 4; j++)
+            r[j] = p[j] - v[j] - (K[j][0] * ii[0] + K[j][1] * ii[1] + K[j][2] * ii[2] + K[j][3] * ii[3]);
+        float A00 = 1.0f + K[0][0] * a00 + K[0][1] * a10, A01 = K[0][0] * a01 + K[0][1] * a11;
+        float A10 = K[1][0] * a00 + K[1][1] * a10,        A11 = 1.0f + K[1][0] * a01 + K[1][1] * a11;
+        float B00 = K[0][2] * b00 + K[0][3] * b10,        B01 = K[0][2] * b01 + K[0][3] * b11;
+        float B10 = K[1][2] * b00 + K[1][3] * b10,        B11 = K[1][2] * b01 + K[1][3] * b11;
+        float C00 = K[2][0] * a00 + K[2][1] * a10,        C01 = K[2][0] * a01 + K[2][1] * a11;
+        float C10 = K[3][0] * a00 + K[3][1] * a10,        C11 = K[3][0] * a01 + K[3][1] * a11;
+        float D00 = 1.0f + K[2][2] * b00 + K[2][3] * b10, D01 = K[2][2] * b01 + K[2][3] * b11;
+        float D10 = K[3][2] * b00 + K[3][3] * b10,        D11 = 1.0f + K[3][2] * b01 + K[3][3] * b11;
+        float detA = A00 * A11 - A01 * A10;
+        float iA = 1.0f / detA;
+        /* X = A⁻¹B, y = A⁻¹r1 */
+        float X00 = ( A11 * B00 - A01 * B10) * iA, X01 = ( A11 * B01 - A01 * B11) * iA;
+        float X10 = (-A10 * B00 + A00 * B10) * iA, X11 = (-A10 * B01 + A00 * B11) * iA;
+        float y0  = ( A11 * r[0] - A01 * r[1]) * iA, y1 = (-A10 * r[0] + A00 * r[1]) * iA;
+        /* S = D − C·X, t = r2 − C·y */
+        float S00 = D00 - (C00 * X00 + C01 * X10), S01 = D01 - (C00 * X01 + C01 * X11);
+        float S10 = D10 - (C10 * X00 + C11 * X10), S11 = D11 - (C10 * X01 + C11 * X11);
+        float t0 = r[2] - (C00 * y0 + C01 * y1), t1 = r[3] - (C10 * y0 + C11 * y1);
+        float iS = 1.0f / (S00 * S11 - S01 * S10);
+        float e2 = (S11 * t0 - S01 * t1) * iS, e3 = (-S10 * t0 + S00 * t1) * iS;
+        float e0 = y0 - (X00 * e2 + X01 * e3), e1 = y1 - (X10 * e2 + X11 * e3);
+        d[0] = lim_step(&dk->port[0], v[0], e0);
+        d[1] = lim_step(&dk->port[1], v[1], e1);
+        d[2] = lim_step(&dk->port[2], v[2], e2);
+        d[3] = lim_step(&dk->port[3], v[3], e3);
+        float maxd = 0.0f;
+        { float m = a00 > 1e-6f ? fabsf(d[0]) : 0.0f; if (m > maxd) maxd = m; }
+        { float m = a11 > 1e-6f ? fabsf(d[1]) : 0.0f; if (m > maxd) maxd = m; }
+        { float m = b00 > 1e-6f ? fabsf(d[2]) : 0.0f; if (m > maxd) maxd = m; }
+        { float m = b11 > 1e-6f ? fabsf(d[3]) : 0.0f; if (m > maxd) maxd = m; }
         v[0] += d[0]; v[1] += d[1]; v[2] += d[2]; v[3] += d[3];
-        /* conducting junctions only (see newton()) */
-        float m0 = a00 > 1e-6f ? fabsf(d[0]) : 0.0f, m1 = a11 > 1e-6f ? fabsf(d[1]) : 0.0f;
-        float m2 = b00 > 1e-6f ? fabsf(d[2]) : 0.0f, m3 = b11 > 1e-6f ? fabsf(d[3]) : 0.0f;
-        if (m0 < 1e-4f && m1 < 1e-4f && m2 < 1e-4f && m3 < 1e-4f) break;
+        if (maxd < 1e-4f) break;      /* conducting junctions only (see newton()) */
     }
     i[0] = ii[0] + a00 * d[0] + a01 * d[1];
     i[1] = ii[1] + a10 * d[0] + a11 * d[1];
@@ -599,9 +637,30 @@ static inline void solve_ports(const bf_dk *dk, bf_dk_state *st, float *z, int n
         float p = dk->Pm[0][nx] * u2;
         _Pragma("GCC unroll 16")
         for (int c = 0; c < nx; c++) p += dk->Pm[0][c] * z[c];
-        float v = closed_form(dk, p);
+        /* Fast path: ≤ 2 Newton steps from a linear prediction (one exp and
+         * one divide each).  Newton error after a step is ≈ |d|²/(2a) for an
+         * exponential junction, so accept only when the step is < 1 mV
+         * (error < ~10 µV); otherwise use the exact Wright-omega solution. */
+        const bf_port *pt = &dk->port[0];
+        const float K = dk->Kf;
+        float v = st->v[0], dv0 = v - st->vp[0];
+        if (dv0 >  0.05f) dv0 =  0.05f;
+        if (dv0 < -0.05f) dv0 = -0.05f;
+        st->vp[0] = v;
+        v += dv0;
+        bool ok = false;
+        float i = 0.0f;
+        for (int it = 0; it < 2; it++) {
+            float g;
+            port1_eval(pt, v, &i, &g);
+            float d = (p - v - K * i) / (1.0f + K * g);
+            v += d;
+            i += g * d;
+            if (fabsf(d) < 1e-3f || K * g < 1e-3f) { ok = true; break; }
+        }
+        if (!ok) { v = closed_form(dk, p); i = (p - v) * dk->invK; }
         st->v[0] = v;
-        z[nx] = (p - v) * dk->invK;
+        z[nx] = i;
         return;
     }
     float p[BF_MAX_PORTS], v[BF_MAX_PORTS], i[BF_MAX_PORTS];
@@ -672,7 +731,7 @@ static void IFX_RAMFUNC(dk_blk_##NN##_##PP##_##AX)(const bf_dk *dk, bf_dk_state 
 #define BF_KERNEL_LIST(X) \
     X(1,0,0) X(1,1,0) X(2,0,0) X(2,1,0) X(2,2,0) X(3,0,0) X(3,1,0) X(3,2,0) \
     X(4,0,0) X(4,1,0) X(4,2,0) X(4,4,0) X(5,0,0) X(5,2,0) X(5,4,0) X(6,0,0) \
-    X(6,2,0) X(8,1,1)
+    X(6,2,0) X(6,4,0) X(8,1,1)
 
 BF_KERNEL_LIST(BF_DK_KERNEL)
 
@@ -756,7 +815,8 @@ bool bf_dk_dc_init(bf_dk_state *st, const bf_netlist *nl, double T,
         else continue;
         double vk = in->Vu[k][0] * u0 + in->Vu[k][1];   /* aux DC = 0 */
         for (int j = 0; j < P; j++) vk += in->Vi[k][j] * i[j];
-        st->z[2 + k] = (float)(2.0 * C / T * vk);      /* zero cap current */
+        double kC = (el->kind == BF_E_C && el->aux2 == 1) ? 1.0 : 2.0;  /* BE vs trapezoid */
+        st->z[2 + k] = (float)(kC * C / T * vk);       /* zero cap current */
         k++;
     }
     for (int j = 0; j < P; j++) { st->v[j] = v[j]; st->vp[j] = v[j]; st->z[2 + N + j] = i[j]; }

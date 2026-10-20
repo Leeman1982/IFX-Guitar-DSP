@@ -1,4 +1,6 @@
+#pragma GCC optimize ("O2")
 #include "effect_chain.h"
+#include <stdio.h>
 /* __dmb() = Data Memory Barrier: ensures all writes before it are globally visible
  * before any read/write after it. Required for correct cross-core visibility
  * (Core 1 writes params; Core 0 audio IRQ reads them). */
@@ -8,14 +10,33 @@
 _Static_assert(EQ_PARAM_COUNT == EQ10_BANDS,
     "EQ_PARAM_COUNT in effect_chain.h must equal EQ10_BANDS in ifx_10band_eq.h");
 
+/* Model-dependent labels and voice range for the Boost Factory params. */
+static void boost_model_changed(EffectChain *ec) {
+    ParamDesc *p = ec->params[FX_BOOST];
+    uint8_t m = (uint8_t)p[BF_MODEL].value;
+    const bf_model_desc *md = &BF_MODELS[m < BF_MODEL_COUNT ? m : 0];
+    p[BF_DRIVE].name = md->driveLabel;
+    p[BF_TONE].name  = md->toneLabel;
+    p[BF_VOICE].max  = (float)(md->nVoices - 1);
+    p[BF_DRIVE].value = md->defDrive * 10.0f;
+    p[BF_TONE].value  = md->defTone * 10.0f;
+    IFX_BF_SetDrive(&ec->boost, md->defDrive);
+    IFX_BF_SetTone(&ec->boost, md->defTone);
+    if (p[BF_VOICE].value > p[BF_VOICE].max) p[BF_VOICE].value = 0.0f;
+    IFX_BF_SetModel(&ec->boost, m);
+    IFX_BF_SetVoice(&ec->boost, (uint8_t)p[BF_VOICE].value);
+}
+
 static void init_param_descs(EffectChain *ec) {
 
-    /* ===== TS Boost ===== */
-    ec->fxNames[FX_TSBOOST] = "TS BOOST";
-    ec->paramCount[FX_TSBOOST] = TS_PARAM_COUNT;
-    ec->params[FX_TSBOOST][TS_DRIVE] = (ParamDesc){"Drive", 1.0f,  100.0f, 1.0f,  10.0f, ""};
-    ec->params[FX_TSBOOST][TS_TONE]  = (ParamDesc){"Tone",  0.0f,  1.0f,   0.05f, 0.5f,  ""};
-    ec->params[FX_TSBOOST][TS_LEVEL] = (ParamDesc){"Level", 0.0f,  2.0f,   0.05f, 0.8f,  ""};
+    /* ===== Boost Factory ===== */
+    ec->fxNames[FX_BOOST] = "BOOST";
+    ec->paramCount[FX_BOOST] = BF_PARAM_COUNT;
+    ec->params[FX_BOOST][BF_MODEL] = (ParamDesc){"Model", 0.0f, (float)(BF_MODEL_COUNT - 1), 1.0f, 0.0f, "", 1};
+    ec->params[FX_BOOST][BF_VOICE] = (ParamDesc){"Voice", 0.0f, 3.0f,   1.0f,  0.0f, "", 1};
+    ec->params[FX_BOOST][BF_DRIVE] = (ParamDesc){"Drive", 0.0f, 10.0f,  0.2f,  6.0f, "", 0};
+    ec->params[FX_BOOST][BF_TONE]  = (ParamDesc){"Tone",  0.0f, 10.0f,  0.2f,  5.0f, "", 0};
+    ec->params[FX_BOOST][BF_LEVEL] = (ParamDesc){"Level", -30.0f, 12.0f, 0.5f, 0.0f, "dB", 0};
 
     /* ===== Noise Gate ===== */
     ec->fxNames[FX_NOISEGATE] = "GATE";
@@ -73,7 +94,7 @@ static void init_param_descs(EffectChain *ec) {
 void EffectChain_Init(EffectChain *ec) {
     init_param_descs(ec);
 
-    ec->active[FX_TSBOOST]   = false;
+    ec->active[FX_BOOST]     = false;
     ec->active[FX_NOISEGATE] = false;
     ec->active[FX_OVERDRIVE] = true;
     ec->active[FX_EQ]        = true;   /* EQ on by default — Metallica preset */
@@ -81,10 +102,12 @@ void EffectChain_Init(EffectChain *ec) {
     ec->active[FX_DELAY]     = false;
     ec->masterVolume = 0.8f;
 
-    IFX_TSBoost_Init(&ec->tsboost, SAMPLE_RATE_HZ);
-    IFX_TSBoost_SetDrive(&ec->tsboost, ec->params[FX_TSBOOST][TS_DRIVE].value);
-    IFX_TSBoost_SetTone(&ec->tsboost,  ec->params[FX_TSBOOST][TS_TONE].value);
-    IFX_TSBoost_SetLevel(&ec->tsboost, ec->params[FX_TSBOOST][TS_LEVEL].value);
+    IFX_BF_Init(&ec->boost, SAMPLE_RATE_HZ);
+    boost_model_changed(ec);
+    IFX_BF_SetDrive(&ec->boost, ec->params[FX_BOOST][BF_DRIVE].value * 0.1f);
+    IFX_BF_SetTone(&ec->boost,  ec->params[FX_BOOST][BF_TONE].value * 0.1f);
+    IFX_BF_SetLevelDb(&ec->boost, ec->params[FX_BOOST][BF_LEVEL].value);
+    IFX_BF_Service(&ec->boost);
 
     IFX_NoiseGate_Init(&ec->noiseGate,
         ec->params[FX_NOISEGATE][NG_THRESHOLD].value,
@@ -124,19 +147,55 @@ void EffectChain_Init(EffectChain *ec) {
 }
 
 
-float EffectChain_Process(EffectChain *ec, float inp) {
-    float sig = inp;
-    if (ec->active[FX_TSBOOST])   sig = IFX_TSBoost_Update(&ec->tsboost, sig);
-    if (ec->active[FX_NOISEGATE]) sig = IFX_NoiseGate_Update(&ec->noiseGate, sig);
-    if (ec->active[FX_OVERDRIVE]) sig = IFX_Overdrive_Update(&ec->overdrive, sig);
-    if (ec->active[FX_EQ])        sig = IFX_10BandEQ_Update(&ec->eq, sig);
-    if (ec->active[FX_CHORUS])    sig = IFX_Chorus_Update(&ec->chorus, sig);
-    if (ec->active[FX_DELAY])     sig = IFX_Delay_Update(&ec->delay, sig);
+void EffectChain_ProcessBoost(EffectChain *ec, float *buf, int n) {
+    if (ec->active[FX_BOOST]) IFX_BF_Process(&ec->boost, buf, n);
+}
+
+void EffectChain_ProcessRest(EffectChain *ec, float *buf, int n) {
+    /* each effect runs a tight loop over the block (better register reuse
+     * and far fewer cross-file calls than per-sample chaining) */
+    if (ec->active[FX_NOISEGATE]) IFX_NoiseGate_Process(&ec->noiseGate, buf, n);
+    if (ec->active[FX_OVERDRIVE]) IFX_Overdrive_Process(&ec->overdrive, buf, n);
+    if (ec->active[FX_EQ])        IFX_10BandEQ_Process(&ec->eq, buf, n);
+    if (ec->active[FX_CHORUS])    IFX_Chorus_Process(&ec->chorus, buf, n);
+    if (ec->active[FX_DELAY])     IFX_Delay_Process(&ec->delay, buf, n);
     /* Master volume is NOT applied here — the audio callback applies a
      * smoothed version to prevent clicks on large rapid changes. */
-    if (sig >  1.0f) sig =  1.0f;
-    if (sig < -1.0f) sig = -1.0f;
-    return sig;
+    for (int i = 0; i < n; i++) {
+        float sig = buf[i];
+        if (sig >  1.0f) sig =  1.0f;
+        if (sig < -1.0f) sig = -1.0f;
+        buf[i] = sig;
+    }
+}
+
+void EffectChain_ProcessBlock(EffectChain *ec, float *buf, int n) {
+    EffectChain_ProcessBoost(ec, buf, n);
+    EffectChain_ProcessRest(ec, buf, n);
+}
+
+void EffectChain_SetBoostLowCpu(EffectChain *ec, bool low) {
+    IFX_BF_SetLowCpu(&ec->boost, low);
+}
+
+void EffectChain_Service(EffectChain *ec) {
+    IFX_BF_Service(&ec->boost);
+}
+
+bool EffectChain_FormatValue(const EffectChain *ec, uint8_t fx, uint8_t pi,
+                             char *buf, unsigned size) {
+    if (fx != FX_BOOST) return false;
+    uint8_t model = (uint8_t)ec->params[FX_BOOST][BF_MODEL].value;
+    if (pi == BF_MODEL) {
+        /* trailing '~' = running at 1× because the CPU fallback kicked in */
+        snprintf(buf, size, "%s%s", IFX_BF_ModelName(model), IFX_BF_IsLowCpu(&ec->boost) ? "~" : "");
+        return true;
+    }
+    if (pi == BF_VOICE) {
+        snprintf(buf, size, "%s", IFX_BF_VoiceName(model, (uint8_t)ec->params[FX_BOOST][BF_VOICE].value));
+        return true;
+    }
+    return false;
 }
 
 void EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, float value) {
@@ -149,11 +208,13 @@ void EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, 
     p->value = value;
 
     switch (fxIndex) {
-    case FX_TSBOOST:
+    case FX_BOOST:
         switch (paramIndex) {
-        case TS_DRIVE: IFX_TSBoost_SetDrive(&ec->tsboost, value); break;
-        case TS_TONE:  IFX_TSBoost_SetTone(&ec->tsboost, value);  break;
-        case TS_LEVEL: IFX_TSBoost_SetLevel(&ec->tsboost, value); break;
+        case BF_MODEL: IFX_BF_SetModel(&ec->boost, (uint8_t)value); boost_model_changed(ec); break;
+        case BF_VOICE: IFX_BF_SetVoice(&ec->boost, (uint8_t)value); break;
+        case BF_DRIVE: IFX_BF_SetDrive(&ec->boost, value * 0.1f); break;
+        case BF_TONE:  IFX_BF_SetTone(&ec->boost,  value * 0.1f); break;
+        case BF_LEVEL: IFX_BF_SetLevelDb(&ec->boost, value); break;
         } break;
 
     case FX_NOISEGATE:

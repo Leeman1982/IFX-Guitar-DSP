@@ -72,7 +72,7 @@
 #define MUX_S3_PIN            7
 #define MUX_SIG_PIN           8
 
-#define MUX_CH_FX1            0    /* TS Boost toggle   */
+#define MUX_CH_FX1            0    /* Boost Factory toggle */
 #define MUX_CH_FX2            1    /* Noise Gate toggle */
 #define MUX_CH_FX3            2    /* Overdrive toggle  */
 #define MUX_CH_FX4            3    /* EQ toggle         */
@@ -86,6 +86,11 @@
 #define LONG_PRESS_MS         500  /* Encoder long-press threshold (ms) */
 
 /* ===== System Clock ===== */
-#define SYS_CLOCK_KHZ         150000
+/* Set by Arduino IDE → Tools → CPU Speed (F_CPU).  The Boost Factory's
+ * transistor-fuzz models need ≥ 200 MHz; 240 MHz is the recommended setting.
+ * Audio clocks (PIO I2S dividers, PCM1808 SCKI) adapt to the chosen speed. */
+#if defined(F_CPU) && (F_CPU < 200000000L)
+#warning "CPU Speed below 200 MHz: select 240 MHz in Tools > CPU Speed for the Boost Factory fuzz models"
+#endif
 
 #endif /* CONFIG_H */

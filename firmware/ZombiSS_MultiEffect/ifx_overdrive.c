@@ -1,4 +1,7 @@
+#pragma GCC optimize ("O2")
 #include "ifx_overdrive.h"
+#include "ifx_bf_math.h"
+#include <string.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846f
@@ -76,36 +79,35 @@ float IFX_OD_LPF_INP_COEF[IFX_OVERDRIVE_LPF_INP_LENGTH] = {
     -0.00020692388031130378f
 };
 
+#define OD_D 8.0f   /* clipper knee sharpness */
+
+static void od_set_hpf(IFX_Overdrive *od) {
+    float w = od->hpfInpWcT;
+    od->hpfG = 2.0f / (2.0f + w);
+    od->hpfA = (2.0f - w) / (2.0f + w);
+}
+
+static void od_set_lpf(IFX_Overdrive *od) {
+    float w = od->lpfOutWcT, w2 = w * w, d = od->lpfOutDamp;
+    float inv = 1.0f / (4.0f + 4.0f * d * w + w2);
+    od->lpfB  = w2 * inv;
+    od->lpfA1 = 2.0f * (w2 - 4.0f) * inv;
+    od->lpfA2 = (4.0f - 4.0f * d * w + w2) * inv;
+}
+
 void IFX_Overdrive_Init(IFX_Overdrive *od, float samplingFrequencyHz,
                          float hpfCutoffFrequencyHz, float odPreGain,
                          float lpfCutoffFrequencyHz, float lpfDamping) {
+    memset(od, 0, sizeof(*od));
     od->T = 1.0f / samplingFrequencyHz;
-
-    od->hpfInpBufIn[0]  = 0.0f; od->hpfInpBufIn[1]  = 0.0f;
-    od->hpfInpBufOut[0] = 0.0f; od->hpfInpBufOut[1] = 0.0f;
     od->hpfInpWcT = 2.0f * M_PI * hpfCutoffFrequencyHz * od->T;
-    od->hpfInpOut = 0.0f;
-
-    for (uint8_t n = 0; n < IFX_OVERDRIVE_LPF_INP_LENGTH; n++) {
-        od->lpfInpBuf[n] = 0.0f;
-    }
-    od->lpfInpBufIndex = 0;
-    od->lpfInpOut = 0.0f;
-
+    od_set_hpf(od);
     od->preGain   = odPreGain;
     od->boostGain = 0.0f;
-    od->threshold = 1.0f / 3.0f;
-
     od->lpfOutWcT  = 2.0f * M_PI * lpfCutoffFrequencyHz * od->T;
     od->lpfOutDamp = lpfDamping;
-
-    for (uint8_t n = 0; n < 3; n++) {
-        od->lpfOutBufIn[n]  = 0.0f;
-        od->lpfOutBufOut[n] = 0.0f;
-    }
-
-    od->Q = -0.2f;
-    od->out = 0.0f;
+    od_set_lpf(od);
+    IFX_Overdrive_SetQ(od, -0.2f);
 }
 
 void IFX_Overdrive_SetGain(IFX_Overdrive *od, float gain) {
@@ -118,73 +120,61 @@ void IFX_Overdrive_SetBoost(IFX_Overdrive *od, float boost) {
 
 void IFX_Overdrive_SetHPF(IFX_Overdrive *od, float hpfCutoffFrequencyHz) {
     od->hpfInpWcT = 2.0f * M_PI * hpfCutoffFrequencyHz * od->T;
+    od_set_hpf(od);
 }
 
 void IFX_Overdrive_SetLPF(IFX_Overdrive *od, float lpfCutoffFrequencyHz, float lpfDamping) {
     od->lpfOutWcT  = 2.0f * M_PI * lpfCutoffFrequencyHz * od->T;
     od->lpfOutDamp = lpfDamping;
+    od_set_lpf(od);
 }
 
 void IFX_Overdrive_SetQ(IFX_Overdrive *od, float Q) {
     od->Q = Q;
+    od->clipOffset = Q / (1.0f - expf(OD_D * Q));
 }
 
-float IFX_Overdrive_Update(IFX_Overdrive *od, float inp) {
-    /* FIR LPF at fs/4 to prevent aliasing from signal squaring */
-    od->lpfInpBuf[od->lpfInpBufIndex] = inp;
-    od->lpfInpBufIndex++;
-    if (od->lpfInpBufIndex == IFX_OVERDRIVE_LPF_INP_LENGTH) {
-        od->lpfInpBufIndex = 0;
+float IFX_RAMFUNC(IFX_Overdrive_Update)(IFX_Overdrive *od, float inp) {
+    /* FIR LPF at fs/4 (69 taps, linear phase).  Symmetric coefficients:
+     * fold the window so only 35 multiplies are needed. */
+    const int L = IFX_OVERDRIVE_LPF_INP_LENGTH;
+    uint8_t idx = od->lpfInpBufIndex;
+    od->lpfInpBuf[idx] = inp;
+    od->lpfInpBuf[idx + L] = inp;
+    idx = (uint8_t)(idx + 1 == L ? 0 : idx + 1);
+    od->lpfInpBufIndex = idx;
+    const float *w = &od->lpfInpBuf[idx];          /* oldest … newest */
+    float acc0 = IFX_OD_LPF_INP_COEF[L / 2] * w[L / 2], acc1 = 0.0f;
+    for (int n = 0; n < L / 2; n += 2) {
+        acc0 += IFX_OD_LPF_INP_COEF[n]     * (w[n]     + w[L - 1 - n]);
+        acc1 += IFX_OD_LPF_INP_COEF[n + 1] * (w[n + 1] + w[L - 2 - n]);
     }
-
-    od->lpfInpOut = 0.0f;
-    uint8_t index = od->lpfInpBufIndex;
-    for (uint8_t n = 0; n < IFX_OVERDRIVE_LPF_INP_LENGTH; n++) {
-        if (index == 0) {
-            index = IFX_OVERDRIVE_LPF_INP_LENGTH - 1;
-        } else {
-            index--;
-        }
-        od->lpfInpOut += IFX_OD_LPF_INP_COEF[n] * od->lpfInpBuf[index];
-    }
+    float lpf = acc0 + acc1;
 
     /* 1st-order IIR HPF to remove low frequency mud */
-    od->hpfInpBufIn[1] = od->hpfInpBufIn[0];
-    od->hpfInpBufIn[0] = od->lpfInpOut;
-    od->hpfInpBufOut[1] = od->hpfInpBufOut[0];
-    od->hpfInpBufOut[0] = (2.0f * (od->hpfInpBufIn[0] - od->hpfInpBufIn[1])
-                          + (2.0f - od->hpfInpWcT) * od->hpfInpBufOut[1])
-                          / (2.0f + od->hpfInpWcT);
-    od->hpfInpOut = od->hpfInpBufOut[0];
+    float hpf = od->hpfG * (lpf - od->hpfX1) + od->hpfA * od->hpfY1;
+    od->hpfX1 = lpf;
+    od->hpfY1 = hpf;
 
     /* Asymmetrical soft clipping */
-    float xGain = (od->preGain + od->boostGain) * od->hpfInpOut;
-    const float d = 8.0f;
-
-    float clipOut = od->Q / (1.0f - expf(d * od->Q));
-    if ((xGain - od->Q) >= 0.00001f) {
-        clipOut += (xGain - od->Q) / (1.0f - expf(-d * (xGain - od->Q)));
-    }
+    float xGain = (od->preGain + od->boostGain) * hpf;
+    float clipOut = od->clipOffset;
+    float diff = xGain - od->Q;
+    if (diff >= 0.00001f) clipOut += diff / (1.0f - bf_exp(-OD_D * diff));
 
     /* 2nd-order IIR LPF to remove HF artifacts */
-    od->lpfOutBufIn[2] = od->lpfOutBufIn[1];
-    od->lpfOutBufIn[1] = od->lpfOutBufIn[0];
-    od->lpfOutBufIn[0] = clipOut;
-
-    od->lpfOutBufOut[2] = od->lpfOutBufOut[1];
-    od->lpfOutBufOut[1] = od->lpfOutBufOut[0];
-
-    float wcT2 = od->lpfOutWcT * od->lpfOutWcT;
-    od->lpfOutBufOut[0] = wcT2 * (od->lpfOutBufIn[0] + 2.0f * od->lpfOutBufIn[1] + od->lpfOutBufIn[2])
-                        - 2.0f * (wcT2 - 4.0f) * od->lpfOutBufOut[1]
-                        - (4.0f - 4.0f * od->lpfOutDamp * od->lpfOutWcT + wcT2) * od->lpfOutBufOut[2];
-    od->lpfOutBufOut[0] /= (4.0f + 4.0f * od->lpfOutDamp * od->lpfOutWcT + wcT2);
-    od->lpfOutOut = od->lpfOutBufOut[0];
+    float y = od->lpfB * (clipOut + 2.0f * od->lpfX1 + od->lpfX2)
+            - od->lpfA1 * od->lpfY1 - od->lpfA2 * od->lpfY2;
+    od->lpfX2 = od->lpfX1; od->lpfX1 = clipOut;
+    od->lpfY2 = od->lpfY1; od->lpfY1 = y;
 
     /* Hard limiter */
-    od->out = od->lpfOutOut;
-    if (od->out > 1.0f) od->out = 1.0f;
-    else if (od->out < -1.0f) od->out = -1.0f;
+    if (y > 1.0f) y = 1.0f;
+    else if (y < -1.0f) y = -1.0f;
+    od->out = y;
+    return y;
+}
 
-    return od->out;
+void IFX_RAMFUNC(IFX_Overdrive_Process)(IFX_Overdrive *od, float *buf, int n) {
+    for (int i = 0; i < n; i++) buf[i] = IFX_Overdrive_Update(od, buf[i]);
 }

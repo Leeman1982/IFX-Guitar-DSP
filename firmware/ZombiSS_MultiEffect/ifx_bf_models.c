@@ -17,6 +17,7 @@
 
 #define R_(a,b,v)        { BF_E_R,     a, b, 0, 0, 0, (float)(v) }
 #define C_(a,b,v)        { BF_E_C,     a, b, 0, 0, 0, (float)(v) }
+#define CJ_(a,b,v)       { BF_E_C,     a, b, 0, 0, 1, (float)(v) }   /* junction parasitic, BE */
 #define L_(a,b,v)        { BF_E_L,     a, b, 0, 0, 0, (float)(v) }
 #define V_(p,m,src,v)    { BF_E_V,     p, m, 0, src, 0, (float)(v) }
 #define POT_(p1,w,p3,R,k,t) { BF_E_POT, p1, w, p3, k, t, (float)(R) }
@@ -446,6 +447,9 @@ static void pickup_voice(bf_elem *w, uint8_t voice) {
     C_(10, 0, 22e-6),               /* C2 22 µF                             */ \
     END_ }
 
+/* Junction capacitance (Cob) is left out here: in the audible band it moved
+ * the 2× aliasing floor by < 2 dB while costing two more solver states on
+ * the most expensive model (the Rangemaster below keeps it — it's cheap). */
 static const bf_elem FF_GE[] = FUZZFACE(-9.0, BF_Q_NKT275_Q1, BF_Q_NKT275_Q2);
 static const bf_elem FF_SI[] = FUZZFACE(+9.0, BF_Q_BC108_Q1, BF_Q_BC108_Q2);
 static const bf_netlist FF_GE_NL = NL(FF_GE, 13, 9, 0);
@@ -480,6 +484,7 @@ static const bf_elem RM[] = {
     R_(5, 2, 470e3),                /* R1                                   */
     R_(5, 0, 68e3),                 /* R2                                   */
     Q_(7, 5, 6, BF_Q_OC44),         /* Q1 OC44                              */
+    CJ_(5, 7, 20e-12),              /* Cob (alloy Ge, estimate)             */
     R_(6, 0, 3.9e3),                /* R3                                   */
     C_(6, 0, 47e-6),                /* C2                                   */
     R_(7, 2, 10e3),                 /* BOOST 10 k (collector load)          */
@@ -504,37 +509,37 @@ static void rm_map(const bf_ui *ui, float *k, float *g, bf_elem *w[]) {
 const bf_model_desc BF_MODELS[BF_MODEL_COUNT] = {
     { "TS808", 2,
       { { &TS_CLIP_NL, 1, 0, NO_RAIL }, { &TS_TONE_NL, 0, 0, NO_RAIL } },
-      4, 4, { "Si", "Asym", "Si x2", "LED" }, "Drive", "Tone", 1.0f, ts_map },
+      4, 4, { "Si", "Asym", "Si x2", "LED" }, "Drive", "Tone", 1.3964f /* +2.9 dB */, 0.6f, 0.5f, ts_map },
 
     { "KLON", 3,
       { { &KLON_GAIN_NL, 0, 0, NO_RAIL }, { &KLON_MAIN_NL, 1, 1, NO_RAIL },
         { &KLON_TONE_NL, 0, 0, NO_RAIL } },
-      2, 2, { "Ge", "Si" }, "Gain", "Treble", 1.0f, klon_map },
+      2, 2, { "Ge", "Si" }, "Gain", "Treble", 0.1549f /* -16.2 dB */, 0.6f, 0.5f, klon_map },
 
     { "DIST+", 2,
       { { &DP_GAIN_NL, 0, 0, 1.7f, 7.3f, 0.5e6f }, { &DP_CLIP_NL, 1, 0, NO_RAIL } },
-      4, 3, { "Ge MXR", "Si DOD", "LED" }, "Dist", "-", 1.0f, dplus_map },
+      4, 3, { "Ge MXR", "Si DOD", "LED" }, "Dist", "n/a", 1.4962f /* +3.5 dB */, 0.6f, 0.5f, dplus_map },
 
     { "RAT", 2,
       { { &RAT_GAIN_NL, 0, 0, 1.2f, 7.8f, 0.3e6f }, { &RAT_CLIP_NL, 1, 0, NO_RAIL } },
-      4, 3, { "Si", "LED Turbo", "Ge" }, "Dist", "Filter", 1.0f, rat_map },
+      4, 3, { "Si", "LED Turbo", "Ge" }, "Dist", "Filter", 0.4732f /* -6.5 dB */, 0.6f, 0.5f, rat_map },
 
     { "DS-1", 3,
       { { &DS_BOOST_NL, 1, 0, NO_RAIL }, { &DS_GAIN_NL, 1, 0, 0.8f, 7.6f, 1.0e6f },
         { &DS_CLIP_NL, 1, 0, NO_RAIL } },
-      2, 3, { "Si", "LED", "Si x2" }, "Dist", "Tone", 1.0f, ds1_map },
+      2, 3, { "Si", "LED", "Si x2" }, "Dist", "Tone", 1.7579f /* +4.9 dB */, 0.6f, 0.5f, ds1_map },
 
     { "BIG MUFF", 4,
-      { { &BMP_IN_NL, 1, 0, NO_RAIL }, { &BMP_CLIP1_NL, 1, 0, NO_RAIL },
+      { { &BMP_IN_NL, 0, 0, NO_RAIL }, { &BMP_CLIP1_NL, 1, 0, NO_RAIL },
         { &BMP_CLIP2_NL, 1, 0, NO_RAIL }, { &BMP_OUT_NL, 0, 0, NO_RAIL } },
-      2, 2, { "Stock", "Mids" }, "Sustain", "Tone", 1.0f, bmp_map },
+      2, 2, { "Stock", "Mids" }, "Sustain", "Tone", 0.4955f /* -6.1 dB */, 0.6f, 0.5f, bmp_map },
 
     { "FUZZFACE Ge", 2, { { &FF_GE_NL, 1, 0, NO_RAIL }, { &FF_OUT_NL, 0, 0, NO_RAIL } },
-      2, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.0f, ff_map },
+      2, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.1220f /* +1.0 dB */, 0.6f, 1.0f, ff_map },
 
     { "FUZZFACE Si", 2, { { &FF_SI_NL, 1, 0, NO_RAIL }, { &FF_OUT_NL, 0, 0, NO_RAIL } },
-      2, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.0f, ff_map },
+      2, 3, { "Single", "Humbck", "Buffer" }, "Fuzz", "Gtr Vol", 1.2882f /* +2.2 dB */, 0.6f, 1.0f, ff_map },
 
     { "RANGEMSTR", 1, { { &RM_NL, 1, 0, NO_RAIL } },
-      2, 3, { "Single", "Humbck", "Buffer" }, "Input", "Gtr Vol", 1.0f, rm_map },
+      2, 3, { "Single", "Humbck", "Buffer" }, "Input", "Gtr Vol", 0.6683f /* -3.5 dB */, 0.6f, 1.0f, rm_map },
 };

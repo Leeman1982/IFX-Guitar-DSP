@@ -40,6 +40,8 @@ extern const float IFX_EQ10_METALLICA_PRESET[EQ10_BANDS];
 void  IFX_10BandEQ_Init(IFX_10BandEQ *eq, float sampleRate_Hz);
 void  IFX_10BandEQ_SetBand(IFX_10BandEQ *eq, uint8_t band, float gainDb);
 float IFX_10BandEQ_Update(IFX_10BandEQ *eq, float in);
+/* Block form (audio core): in-place over n samples. */
+void  IFX_10BandEQ_Process(IFX_10BandEQ *eq, float *buf, int n);
 
 #ifdef __cplusplus
 }
