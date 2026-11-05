@@ -16,7 +16,7 @@ Guitar Input (PCM1808 ADC, 24-bit I2S)
     ↓
 [Boost Factory]  ← core 1 (doorbell IRQ, one block ahead)
     ↓
-[Noise Gate] → [Overdrive] → [10-Band EQ] → [Chorus] → [Delay]   ← core 0 (DMA IRQ)
+[Noise Gate] → [Overdrive] → [10-Band EQ] → [Chorus] → [Delay ⇄ Reverb]   ← core 0 (DMA IRQ)
     ↓
 Master Volume Smoother (prevents clicks)
     ↓
@@ -26,6 +26,8 @@ Output (PCM5102 DAC, 24-bit I2S, mono → stereo L/R)
 **Sample Rate:** 48 kHz  
 **Buffer Size:** 64 frames per half-buffer = ~1.33 ms (+1 block for the core-1 Boost Factory pipeline)  
 **Signal Format:** Float [-1.0, +1.0] between effects
+**Switching:** every effect crossfades over 6 ms when toggled (no clicks); delay and reverb
+have optional trails and a momentary HOLD (freeze) switch — see §6, §6b, §7b.
 
 ---
 
@@ -560,75 +562,81 @@ float IFX_Chorus_Update(IFX_Chorus *cho, float inp);
 
 ---
 
-## 6. Delay Effect
+## 6. Delay Effect (v2)
 
-### Algorithm
-A simple feedback delay line with wet/dry mixing.
+Several ideas here come from the GuitarML STM32 pedal (`Leeman1982/GuitarPedalSTM32`,
+`software/util/Delays`, `tape_modulator`), rewritten in C for this chain.
 
-**Signal Flow:**
+### Signal flow
 ```
-Input ──┐
-        ├→ [Delay Line + Feedback Loop] → [Mix] → Output
-        │
-        └──────────────────────────────────┘
+line ← feed·in + fb·LPF(read)          (int16 storage, truncating, saturating)
+wet  = LPF(read)                        read = tap(T + wow/flutter)        NORMAL
+                                        read = 2 grains @ 2× speed         OCTAVE  (+12 st, climbs per repeat)
+                                        read = 2 grains running backwards  REVERSE (grain = Time)
+out  = dry·MixDry(mix) + wet·MixWet(mix)   (effect chain, see "mix law")
 ```
+- **int16 line:** 72 000 samples = 1.5 s in 144 KB. The float line held 660 ms in 128 KB.
+  Values are truncated toward zero, not rounded: in a lossy feedback loop, rounding leaves
+  dead-band limit cycles that never decay.
+- **Time glide:** an 80 ms one-pole, slew-limited to ±0.5 samples/sample. Turning Time bends
+  the pitch like tape instead of jumping and clicking.
+- **Grains (OCTAVE / REVERSE):** two read heads half a period apart with sin² windows (they
+  sum to 1). The octave grain is 3072 samples. A reverse grain equals Time, so REVERSE goes up
+  to 0.75 s.
+- **Wow & flutter:** smooth gradient noise (Perlin-style, hashed lattice, period 4096). Wow is
+  0.9 Hz with 2 octaves; flutter is 7 Hz. At depth 1 the excursion is ±40 / ±5 samples. It is
+  evaluated every 32 samples and interpolated.
+- **Feed:** a 10 ms ramp on the input gain. Feed = 0 gives trails (the tail rings on) and
+  freeze (fb = 1, loop filter bypassed).
 
-### Delay Line Implementation
-
-```
-Circular buffer of length N = (delayTime_ms × fs) / 1000
-
-write phase:
-  delayLine[writeIndex] = input + feedback × delayLine[readIndex]
-  
-read phase:
-  delayed = delayLine[readIndex]
-  
-output:
-  output = mix × delayed + (1 - mix) × input
-```
+### Mix law (delay and reverb)
+`MixDry = min(1, 2(1−mix))`, `MixWet = min(1, 2·mix)`. Dry stays at unity up to mix 0.5. The
+old `(1−mix)·dry + mix·wet` law lowered the guitar as soon as any delay was dialled in.
 
 ### Parameters
-
-| Name | Range | Unit |
-|------|-------|------|
-| Time | 10–660 | ms |
-| Mix | 0.0–1.0 | — |
-| Feedback | 0.0–0.95 | — |
-
-### Default Initialization
-
-```c
-time = 300 ms
-mix = 0.35
-feedback = 0.4
-```
-
-### Memory Usage
-
-```
-Max delay: 660 ms @ 48 kHz = 32000 samples = 128 KB
-```
-
-### C-Style Integration
+| Name | Range | Default |
+|------|-------|---------|
+| Time | 10–1500 ms | 300 |
+| Mix | 0–1 | 0.25 |
+| Feedback | 0–0.95 | 0.4 |
+| Mode | NORMAL / OCTAVE / REVERSE | NORMAL |
+| Tone | 500–12000 Hz (LPF in the loop) | 6000 |
+| Wow/Flut | 0–1 | 0.15 |
+| Trails | OFF / ON | ON |
 
 ```c
-typedef struct {
-    float mix;
-    float feedback;
-    float line[32000];      // ~660 ms @ 48 kHz
-    uint32_t lineIndex;
-    uint32_t lineLength;
-    float out;
-} IFX_Delay;
-
-void IFX_Delay_Init(IFX_Delay *dly, float delayTime_ms,
-                    float mix, float feedback, float sampleRate_Hz);
-float IFX_Delay_Update(IFX_Delay *dly, float inp);
-void IFX_Delay_SetLength(IFX_Delay *dly, float delayTime_ms, float sampleRate_Hz);
-void IFX_Delay_SetMix(IFX_Delay *dly, float mix);
-void IFX_Delay_SetFeedback(IFX_Delay *dly, float feedback);
+IFX_Delay_Init(&dly, 300.0f, 0.25f, 0.4f, 48000.0f);
+IFX_Delay_SetMode(&dly, IFX_DLY_REVERSE);
+IFX_Delay_ProcessWet(&dly, in, wet, 64);   /* wet only; IFX_Delay_Process() = mixed, in place */
 ```
+
+---
+
+## 6b. Plate Reverb (new)
+
+The figure-of-eight tank from Dattorro, *Effect Design Part 1* (JAES 1997), written from the
+paper (`ifx_reverb.c`, MIT).
+
+The GuitarML pedal uses DaisySP's ReverbSc, which is **LGPL-2.1**. Copying it into this MIT
+repo would bring LGPL relinking obligations to the firmware, so it was not copied. Only its
+int16-storage idea is reused: all 13 lines share one int16 pool of 41 137 samples (82 KB)
+instead of ~164 KB as float.
+
+- Predelay (0–100 ms) → bandwidth LPF → 4 input allpasses (0.75, 0.75, 0.625, 0.625).
+- Tank: modulated allpass (−0.70, ±26 samples, 1 Hz, quadrature L/R) → delay → damping LPF →
+  ×decay → allpass (decay + 0.15, clamped to 0.25…0.5) → delay, cross-coupled.
+- Output: the 14 taps of the paper's table, L + R summed (mono out). The input is scaled by
+  0.5 for int16 headroom.
+- Freeze: decay 1, damping off, input muted.
+
+| Name | Range | Default |
+|------|-------|---------|
+| Mix | 0–1 | 0.3 |
+| Decay | 0–0.98 | 0.6 (RT60 ≈ 1.45 s) |
+| Tone | 1–16 kHz (tank damping) | 6000 |
+| PreDelay | 0–100 ms | 10 |
+| Routing | DLY>VERB / PARALLEL / VERB>DLY | DLY>VERB |
+| Trails | OFF / ON | ON |
 
 ---
 
@@ -650,6 +658,23 @@ output = audioSample × smoothedVol
 - **Location:** Core 0 audio callback (no cross-core sync needed)
 
 This is critical for zero-click operation when the user adjusts volume via the rotary encoder.
+
+---
+
+## 7b. Switching, Trails and Hold
+
+- **Crossfaded toggles:** each effect has a 0…1 fade (6 ms). While fading, the dry block is
+  kept and blended, so toggling a 40× overdrive no longer clicks. A fully-off effect is still
+  skipped (no CPU).
+- **Time effects when switched off:** they keep running with their input muted until the tail
+  has been below −66 dBFS for longer than their longest internal delay. Then they stop.
+  - Trails ON: you hear that tail.
+  - Trails OFF: the wet gain ramps to 0 in 10 ms.
+  - Either way, re-enabling never replays stale audio.
+- **HOLD (MUX CH8, momentary):** freezes the active delay and reverb while held (GuitarML's aux
+  footswitch). The OLED header shows `*HOLD*`.
+- **MUX CH9 / CH10** toggle delay and reverb. Unwired channels read "not pressed" thanks to
+  the SIG pull-up.
 
 ---
 
@@ -701,7 +726,7 @@ Conversion from float [-1.0, +1.0]:
 1. **C99 or C++ compiler** with `<math.h>` support
 2. **32-bit floating-point** math (float)
 3. **Sample rate flexibility** (init functions take `sampleRate_Hz` as parameter)
-4. **RAM:** ~160 KB minimum (dominated by Chorus & Delay delay lines)
+4. **RAM:** `sizeof(EffectChain)` = 273 KB (delay 144 KB, reverb 84 KB, boost 22 KB, chorus 8 KB, gate 10 KB)
 
 ### Pseudocode Integration
 
@@ -786,7 +811,15 @@ sample per core**.
 
 | Effect (core 0) | Instructions | Pessimistic cycles |
 |-----------------|--------------|--------------------|
-| Noise gate + overdrive + 10-band EQ + chorus + delay (all on) | ~850 | ~2180 |
+| Noise gate + overdrive + 10-band EQ + chorus + old delay (all on) | ~850 | ~2180 |
+| + delay v2 (NORMAL) | ~+150 (static estimate) | — |
+| + plate reverb | ~+740 (static estimate) | — |
+
+The two new rows are **not measured**. They come from the instruction count of `dly_tick` /
+`rv_tick` compiled for `-mcpu=cortex-m33 -O2`; the reverb tick is almost branch-free, at 770
+static instructions. With everything on, core 0 is estimated at ~1750 instructions/sample, about
+45–85 % of the 5208-cycle budget depending on real cycles per instruction. Check the core-0
+figure on the OLED before relying on it.
 
 | Boost Factory model (core 1) | Instructions | Pessimistic cycles |
 |-----------------------------|--------------|--------------------|

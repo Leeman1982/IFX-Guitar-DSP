@@ -1,0 +1,96 @@
+{
+  "_comment": "Board database for pedalflash. 'methods' lists what the HARDWARE supports; the first is the default. mcu = CubeMX part name (used only when a project has no .cproject).",
+  "boards": [
+    {
+      "id": "guitarml-h7b0",
+      "name": "GuitarML STM32 Guitar Pedal (STM32H7B0VB + CS4270)",
+      "mcu": "STM32H7B0VBTx",
+      "openocd_target": "stm32h7x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["stlink"],
+      "project_hint": "software/stm32h7b0vbt6_guitar_pedal",
+      "notes": [
+        "No USB on this PCB (PA11 drives an LED), so USB-DFU is impossible: flash with an ST-LINK V3 (it plugs into USB) on the 10-pin JTAG header.",
+        "Pedal must also be powered from its 9 V supply while flashing.",
+        "If the pedal runs after flashing but not after a power cycle, set the boot option bytes once (BOOT_CM7_ADD0/ADD1 = 0x0800, see the GuitarPedalSTM32 README)."
+      ]
+    },
+    {
+      "id": "infinifx-h7b0",
+      "name": "Phil's Lab InfiniFX Reloaded (STM32H7B0VB + CS4270, USB-C)",
+      "mcu": "STM32H7B0VBTx",
+      "openocd_target": "stm32h7x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["stlink", "dfu"],
+      "project_hint": "firmware/InfiniFX-Reloaded-TikiDrive_Firmware",
+      "dfu_entry": "Hold BOOT0 high (BOOT button / jumper, if your board revision has one) while plugging in USB, then release. 'pedalflash doctor' should then list 0483:df11.",
+      "notes": [
+        "USB OTG HS is on PA11/PA12, so the ROM DFU bootloader can be used if BOOT0 is reachable on your board revision (not verified on hardware)."
+      ]
+    },
+    {
+      "id": "blackpill-f411",
+      "name": "WeAct BlackPill STM32F411CE",
+      "mcu": "STM32F411CEUx",
+      "openocd_target": "stm32f4x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["dfu", "stlink"],
+      "dfu_entry": "Hold BOOT0, tap NRST, release BOOT0 (USB-C plugged in)."
+    },
+    {
+      "id": "blackpill-f401",
+      "name": "WeAct BlackPill STM32F401CC",
+      "mcu": "STM32F401CCUx",
+      "openocd_target": "stm32f4x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["dfu", "stlink"],
+      "dfu_entry": "Hold BOOT0, tap NRST, release BOOT0 (USB-C plugged in)."
+    },
+    {
+      "id": "bluepill-f103",
+      "name": "BluePill STM32F103C8",
+      "mcu": "STM32F103C8Tx",
+      "openocd_target": "stm32f1x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["stlink"],
+      "notes": [
+        "The F103 ROM bootloader has no USB DFU (UART only): use an ST-LINK on the SWD pins.",
+        "Clone chips (CKS32/GD32) may need: --openocd-extra \"set CPUTAPID 0\"."
+      ]
+    },
+    {
+      "id": "nucleo-f446re",
+      "name": "ST Nucleo-F446RE (on-board ST-LINK)",
+      "mcu": "STM32F446RETx",
+      "openocd_target": "stm32f4x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["stlink"]
+    },
+    {
+      "id": "nucleo-g474re",
+      "name": "ST Nucleo-G474RE (on-board ST-LINK)",
+      "mcu": "STM32G474RETx",
+      "openocd_target": "stm32g4x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["stlink"]
+    },
+    {
+      "id": "nucleo-h743zi",
+      "name": "ST Nucleo-H743ZI2 (on-board ST-LINK)",
+      "mcu": "STM32H743ZITx",
+      "openocd_target": "stm32h7x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["stlink"]
+    },
+    {
+      "id": "daisy-seed",
+      "name": "Electrosmith Daisy Seed (STM32H750IB, internal flash)",
+      "mcu": "STM32H750IBKx",
+      "openocd_target": "stm32h7x.cfg",
+      "flash_base": "0x08000000",
+      "methods": ["dfu", "stlink"],
+      "dfu_entry": "Hold BOOT, tap RESET, release BOOT.",
+      "notes": ["Only the 128 KB internal-flash layout is handled; QSPI/bootloader apps need Electrosmith's own tooling."]
+    }
+  ]
+}

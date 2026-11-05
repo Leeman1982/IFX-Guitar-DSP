@@ -14,6 +14,7 @@ extern "C" {
 #include "ifx_10band_eq.h"
 #include "ifx_chorus.h"
 #include "ifx_delay.h"
+#include "ifx_reverb.h"
 
 /* ===== Effect indices (chain order) ===== */
 #define FX_BOOST       0   /* Boost Factory (9 circuit models) — footswitch FX1 */
@@ -21,8 +22,9 @@ extern "C" {
 #define FX_OVERDRIVE   2   /* Overdrive/distortion — footswitch FX3 */
 #define FX_EQ          3   /* 10-band graphic EQ   — footswitch FX4 */
 #define FX_CHORUS      4   /* Chorus               — footswitch FX5 */
-#define FX_DELAY       5   /* Delay                — menu toggle only */
-#define FX_COUNT       6
+#define FX_DELAY       5   /* Delay                — menu / MUX CH9   */
+#define FX_REVERB      6   /* Plate reverb         — menu / MUX CH10  */
+#define FX_COUNT       7
 
 #define SAMPLE_RATE_HZ 48000.0f
 
@@ -79,7 +81,24 @@ extern "C" {
 #define DL_TIME         0
 #define DL_MIX          1
 #define DL_FEEDBACK     2
-#define DL_PARAM_COUNT  3
+#define DL_MODE         3   /* enum: NORMAL / OCTAVE / REVERSE            */
+#define DL_TONE         4   /* Hz: LPF inside the feedback loop           */
+#define DL_MOD          5   /* 0–1: tape wow & flutter                    */
+#define DL_TRAILS       6   /* enum: Off / On (tail rings after switch-off) */
+#define DL_PARAM_COUNT  7
+
+/* Reverb params */
+#define RV_MIX          0
+#define RV_DECAY        1
+#define RV_TONE         2   /* Hz: tank damping                           */
+#define RV_PREDELAY     3
+#define RV_ROUTING      4   /* enum: DLY>VERB / PARALLEL / VERB>DLY       */
+#define RV_TRAILS       5
+#define RV_PARAM_COUNT  6
+
+#define ROUTE_DLY_VERB  0
+#define ROUTE_PARALLEL  1
+#define ROUTE_VERB_DLY  2
 
 #define MAX_PARAMS_PER_FX 10  /* EQ_PARAM_COUNT is the maximum */
 
@@ -100,9 +119,18 @@ typedef struct {
     IFX_10BandEQ     eq;
     IFX_Chorus       chorus;
     IFX_Delay        delay;
+    IFX_Reverb       reverb;
 
-    bool active[FX_COUNT];
+    volatile bool active[FX_COUNT];
+    volatile bool hold;          /* freeze delay + reverb (momentary footswitch) */
     float masterVolume;
+
+    /* audio-core state: click-free on/off crossfades (0 = bypassed, 1 = on) */
+    float fade[FX_COUNT];
+    /* time effects: smoothed dry/wet gains, and whether a tail is still ringing */
+    float dDry, dWet, rDry, rWet;
+    bool  dRun, rRun;
+    uint32_t dQuiet, rQuiet;     /* samples of silent tail while switched off */
 
     ParamDesc params[FX_COUNT][MAX_PARAMS_PER_FX];
     uint8_t paramCount[FX_COUNT];
@@ -126,6 +154,8 @@ bool  EffectChain_FormatValue(const EffectChain *ec, uint8_t fxIndex, uint8_t pa
 void  EffectChain_ToggleEffect(EffectChain *ec, uint8_t fxIndex);
 void  EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, float value);
 void  EffectChain_SetMasterVolume(EffectChain *ec, float vol);
+/* Momentary freeze of delay + reverb (GuitarML-style hold footswitch). */
+void  EffectChain_SetHold(EffectChain *ec, bool on);
 
 #ifdef __cplusplus
 }

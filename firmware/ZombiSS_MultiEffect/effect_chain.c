@@ -1,10 +1,17 @@
 #pragma GCC optimize ("O2")
 #include "effect_chain.h"
 #include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include "ifx_mix.h"
 /* __dmb() = Data Memory Barrier: ensures all writes before it are globally visible
  * before any read/write after it. Required for correct cross-core visibility
  * (Core 1 writes params; Core 0 audio IRQ reads them). */
+#if defined(__arm__)
 #define PARAM_WRITE_BARRIER() __asm volatile ("dmb sy" ::: "memory")
+#else   /* host builds (tools/ test kits) */
+#define PARAM_WRITE_BARRIER() __atomic_thread_fence(__ATOMIC_SEQ_CST)
+#endif
 
 /* Compile-time guard: EQ param count must match the actual number of EQ bands */
 _Static_assert(EQ_PARAM_COUNT == EQ10_BANDS,
@@ -86,9 +93,23 @@ static void init_param_descs(EffectChain *ec) {
     /* ===== Delay ===== */
     ec->fxNames[FX_DELAY] = "DELAY";
     ec->paramCount[FX_DELAY] = DL_PARAM_COUNT;
-    ec->params[FX_DELAY][DL_TIME]     = (ParamDesc){"Time",     10.0f, 660.0f, 5.0f,  300.0f, "ms"};
-    ec->params[FX_DELAY][DL_MIX]      = (ParamDesc){"Mix",      0.0f,  1.0f,   0.05f, 0.35f,  ""};
+    ec->params[FX_DELAY][DL_TIME]     = (ParamDesc){"Time",     10.0f, 1500.0f, 10.0f, 300.0f, "ms"};
+    ec->params[FX_DELAY][DL_MIX]      = (ParamDesc){"Mix",      0.0f,  1.0f,   0.05f, 0.25f,  ""};
     ec->params[FX_DELAY][DL_FEEDBACK] = (ParamDesc){"Feedback", 0.0f,  0.95f,  0.05f, 0.4f,   ""};
+    ec->params[FX_DELAY][DL_MODE]     = (ParamDesc){"Mode",     0.0f,  (float)(IFX_DLY_MODE_COUNT - 1), 1.0f, 0.0f, "", 1};
+    ec->params[FX_DELAY][DL_TONE]     = (ParamDesc){"Tone",     500.0f, 12000.0f, 250.0f, 6000.0f, "Hz"};
+    ec->params[FX_DELAY][DL_MOD]      = (ParamDesc){"Wow/Flut", 0.0f,  1.0f,   0.05f, 0.15f,  ""};
+    ec->params[FX_DELAY][DL_TRAILS]   = (ParamDesc){"Trails",   0.0f,  1.0f,   1.0f,  1.0f,   "", 1};
+
+    /* ===== Plate reverb ===== */
+    ec->fxNames[FX_REVERB] = "REVERB";
+    ec->paramCount[FX_REVERB] = RV_PARAM_COUNT;
+    ec->params[FX_REVERB][RV_MIX]      = (ParamDesc){"Mix",      0.0f,  1.0f,    0.05f, 0.3f,    ""};
+    ec->params[FX_REVERB][RV_DECAY]    = (ParamDesc){"Decay",    0.0f,  0.98f,   0.02f, 0.6f,    ""};
+    ec->params[FX_REVERB][RV_TONE]     = (ParamDesc){"Tone",     1000.0f, 16000.0f, 250.0f, 6000.0f, "Hz"};
+    ec->params[FX_REVERB][RV_PREDELAY] = (ParamDesc){"PreDelay", 0.0f,  100.0f,  2.0f,  10.0f,   "ms"};
+    ec->params[FX_REVERB][RV_ROUTING]  = (ParamDesc){"Routing",  0.0f,  2.0f,    1.0f,  0.0f,    "", 1};
+    ec->params[FX_REVERB][RV_TRAILS]   = (ParamDesc){"Trails",   0.0f,  1.0f,    1.0f,  1.0f,    "", 1};
 }
 
 void EffectChain_Init(EffectChain *ec) {
@@ -100,6 +121,7 @@ void EffectChain_Init(EffectChain *ec) {
     ec->active[FX_EQ]        = true;   /* EQ on by default — Metallica preset */
     ec->active[FX_CHORUS]    = false;
     ec->active[FX_DELAY]     = false;
+    ec->active[FX_REVERB]    = false;
     ec->masterVolume = 0.8f;
 
     IFX_BF_Init(&ec->boost, SAMPLE_RATE_HZ);
@@ -144,21 +166,157 @@ void EffectChain_Init(EffectChain *ec) {
         ec->params[FX_DELAY][DL_MIX].value,
         ec->params[FX_DELAY][DL_FEEDBACK].value,
         SAMPLE_RATE_HZ);
+    IFX_Delay_SetMode(&ec->delay, (uint8_t)ec->params[FX_DELAY][DL_MODE].value);
+    IFX_Delay_SetTone(&ec->delay, ec->params[FX_DELAY][DL_TONE].value);
+    IFX_Delay_SetMod(&ec->delay,  ec->params[FX_DELAY][DL_MOD].value);
+
+    IFX_Reverb_Init(&ec->reverb, SAMPLE_RATE_HZ);
+    IFX_Reverb_SetMix(&ec->reverb,      ec->params[FX_REVERB][RV_MIX].value);
+    IFX_Reverb_SetDecay(&ec->reverb,    ec->params[FX_REVERB][RV_DECAY].value);
+    IFX_Reverb_SetDamping(&ec->reverb,  ec->params[FX_REVERB][RV_TONE].value);
+    IFX_Reverb_SetPreDelay(&ec->reverb, ec->params[FX_REVERB][RV_PREDELAY].value);
+
+    for (int i = 0; i < FX_COUNT; i++) ec->fade[i] = ec->active[i] ? 1.0f : 0.0f;
+    ec->hold = false;
+    ec->dDry = ec->rDry = 1.0f;
+    ec->dWet = ec->rWet = 0.0f;
+    ec->dRun = ec->rRun = false;
+    ec->dQuiet = ec->rQuiet = 0;
 }
 
 
+/* ---- click-free switching ------------------------------------------------
+ * Toggling an effect used to swap dry ↔ wet at a sample boundary, which
+ * clicks (loudly, on a 40× overdrive).  Every effect now crossfades over
+ * FADE_MS; while fully off it is skipped as before (no CPU cost). */
+#define FADE_MS      6.0f
+#define FADE_STEP    (1000.0f / (FADE_MS * SAMPLE_RATE_HZ))
+#define GAIN_STEP    (1.0f / 480.0f)            /* 10 ms dry/wet gain ramps */
+#define TAIL_SILENT  5.0e-4f                    /* ≈ −66 dBFS               */
+
+static inline void xfade(float *buf, const float *dry, int n, float *fade, bool on) {
+    float f = *fade;
+    for (int i = 0; i < n; i++) {
+        if (on) { f += FADE_STEP; if (f > 1.0f) f = 1.0f; }
+        else    { f -= FADE_STEP; if (f < 0.0f) f = 0.0f; }
+        buf[i] = dry[i] + f * (buf[i] - dry[i]);
+    }
+    *fade = f;
+}
+
+#define RUN_FX(ec, FX, CALL) do {                                          \
+        bool on_ = (ec)->active[FX];                                       \
+        float *fd_ = &(ec)->fade[FX];                                      \
+        if (on_ && *fd_ >= 1.0f) { CALL; }                                 \
+        else if (on_ || *fd_ > 0.0f) {                                     \
+            float dry_[BF_BLOCK_MAX];                                      \
+            memcpy(dry_, buf, (size_t)n * sizeof(float));                  \
+            CALL;                                                          \
+            xfade(buf, dry_, n, fd_, on_);                                 \
+        }                                                                  \
+    } while (0)
+
+static inline float ramp_to(float g, float t) {
+    if (g < t - GAIN_STEP) return g + GAIN_STEP;
+    if (g > t + GAIN_STEP) return g - GAIN_STEP;
+    return t;
+}
+
+static float block_peak(const float *x, int n) {
+    float p = 0.0f;
+    for (int i = 0; i < n; i++) { float a = fabsf(x[i]); if (a > p) p = a; }
+    return p;
+}
+
+/* Delay + reverb.  Ideas from the GuitarML pedal: selectable routing
+ * (delay→reverb, parallel, reverb→delay), trails, and a hold/freeze switch.
+ * A switched-off time effect keeps running with its input muted until its
+ * tail has died away, so re-enabling it never replays stale audio; with
+ * Trails = On that tail is also heard. */
+static void time_stage(EffectChain *ec, float *buf, int n) {
+    const bool dOn = ec->active[FX_DELAY], rOn = ec->active[FX_REVERB];
+    const bool dTrails = ec->params[FX_DELAY][DL_TRAILS].value > 0.5f;
+    const bool rTrails = ec->params[FX_REVERB][RV_TRAILS].value > 0.5f;
+    const float dMix = ec->params[FX_DELAY][DL_MIX].value;
+    const float rMix = ec->params[FX_REVERB][RV_MIX].value;
+    const uint8_t route = (uint8_t)ec->params[FX_REVERB][RV_ROUTING].value;
+
+    if (dOn) { ec->dRun = true; ec->dQuiet = 0; }
+    if (rOn) { ec->rRun = true; ec->rQuiet = 0; }
+    if (!ec->dRun && !ec->rRun) return;
+
+    IFX_Delay_SetFeed(&ec->delay, dOn ? 1.0f : 0.0f);
+    IFX_Reverb_SetFeed(&ec->reverb, rOn ? 1.0f : 0.0f);
+    IFX_Delay_SetFreeze(&ec->delay, ec->hold && dOn);
+    IFX_Reverb_SetFreeze(&ec->reverb, ec->hold && rOn);
+
+    const float dDryT = dOn ? IFX_MixDry(dMix) : 1.0f;
+    const float dWetT = (dOn || dTrails) ? IFX_MixWet(dMix) : 0.0f;
+    const float rDryT = rOn ? IFX_MixDry(rMix) : 1.0f;
+    const float rWetT = (rOn || rTrails) ? IFX_MixWet(rMix) : 0.0f;
+
+    float wd[BF_BLOCK_MAX], wr[BF_BLOCK_MAX];
+    float dDry = ec->dDry, dWet = ec->dWet, rDry = ec->rDry, rWet = ec->rWet;
+
+    if (route == ROUTE_PARALLEL) {
+        if (ec->dRun) IFX_Delay_ProcessWet(&ec->delay, buf, wd, n);   else memset(wd, 0, sizeof(float) * (size_t)n);
+        if (ec->rRun) IFX_Reverb_ProcessWet(&ec->reverb, buf, wr, n); else memset(wr, 0, sizeof(float) * (size_t)n);
+        for (int i = 0; i < n; i++) {
+            dDry = ramp_to(dDry, dDryT); dWet = ramp_to(dWet, dWetT);
+            rDry = ramp_to(rDry, rDryT); rWet = ramp_to(rWet, rWetT);
+            buf[i] = buf[i] * dDry * rDry + wd[i] * dWet + wr[i] * rWet;
+        }
+    } else {
+        const bool delayFirst = (route != ROUTE_VERB_DLY);
+        for (int stage = 0; stage < 2; stage++) {
+            bool isDelay = (stage == 0) == delayFirst;
+            if (isDelay) {
+                if (!ec->dRun) { memset(wd, 0, sizeof(float) * (size_t)n); continue; }
+                IFX_Delay_ProcessWet(&ec->delay, buf, wd, n);
+                for (int i = 0; i < n; i++) {
+                    dDry = ramp_to(dDry, dDryT); dWet = ramp_to(dWet, dWetT);
+                    buf[i] = buf[i] * dDry + wd[i] * dWet;
+                }
+            } else {
+                if (!ec->rRun) { memset(wr, 0, sizeof(float) * (size_t)n); continue; }
+                IFX_Reverb_ProcessWet(&ec->reverb, buf, wr, n);
+                for (int i = 0; i < n; i++) {
+                    rDry = ramp_to(rDry, rDryT); rWet = ramp_to(rWet, rWetT);
+                    buf[i] = buf[i] * rDry + wr[i] * rWet;
+                }
+            }
+        }
+    }
+    ec->dDry = dDry; ec->dWet = dWet; ec->rDry = rDry; ec->rWet = rWet;
+
+    /* stop a switched-off effect once its tail is silent for longer than
+     * its longest internal delay */
+    if (!dOn && ec->dRun) {
+        if (block_peak(wd, n) < TAIL_SILENT) ec->dQuiet += (uint32_t)n; else ec->dQuiet = 0;
+        if (ec->dQuiet > (uint32_t)ec->delay.timeCur * 2u + 4800u) {
+            ec->dRun = false; ec->dDry = 1.0f; ec->dWet = 0.0f;
+        }
+    }
+    if (!rOn && ec->rRun) {
+        if (block_peak(wr, n) < TAIL_SILENT) ec->rQuiet += (uint32_t)n; else ec->rQuiet = 0;
+        if (ec->rQuiet > (uint32_t)ec->reverb.preDelay + 9600u) {
+            ec->rRun = false; ec->rDry = 1.0f; ec->rWet = 0.0f;
+        }
+    }
+}
+
 void EffectChain_ProcessBoost(EffectChain *ec, float *buf, int n) {
-    if (ec->active[FX_BOOST]) IFX_BF_Process(&ec->boost, buf, n);
+    RUN_FX(ec, FX_BOOST, IFX_BF_Process(&ec->boost, buf, n));
 }
 
 void EffectChain_ProcessRest(EffectChain *ec, float *buf, int n) {
     /* each effect runs a tight loop over the block (better register reuse
      * and far fewer cross-file calls than per-sample chaining) */
-    if (ec->active[FX_NOISEGATE]) IFX_NoiseGate_Process(&ec->noiseGate, buf, n);
-    if (ec->active[FX_OVERDRIVE]) IFX_Overdrive_Process(&ec->overdrive, buf, n);
-    if (ec->active[FX_EQ])        IFX_10BandEQ_Process(&ec->eq, buf, n);
-    if (ec->active[FX_CHORUS])    IFX_Chorus_Process(&ec->chorus, buf, n);
-    if (ec->active[FX_DELAY])     IFX_Delay_Process(&ec->delay, buf, n);
+    RUN_FX(ec, FX_NOISEGATE, IFX_NoiseGate_Process(&ec->noiseGate, buf, n));
+    RUN_FX(ec, FX_OVERDRIVE, IFX_Overdrive_Process(&ec->overdrive, buf, n));
+    RUN_FX(ec, FX_EQ,        IFX_10BandEQ_Process(&ec->eq, buf, n));
+    RUN_FX(ec, FX_CHORUS,    IFX_Chorus_Process(&ec->chorus, buf, n));
+    time_stage(ec, buf, n);
     /* Master volume is NOT applied here — the audio callback applies a
      * smoothed version to prevent clicks on large rapid changes. */
     for (int i = 0; i < n; i++) {
@@ -184,6 +342,20 @@ void EffectChain_Service(EffectChain *ec) {
 
 bool EffectChain_FormatValue(const EffectChain *ec, uint8_t fx, uint8_t pi,
                              char *buf, unsigned size) {
+    if (fx == FX_DELAY && pi == DL_MODE) {
+        snprintf(buf, size, "%s", IFX_Delay_ModeName((uint8_t)ec->params[FX_DELAY][DL_MODE].value));
+        return true;
+    }
+    if ((fx == FX_DELAY && pi == DL_TRAILS) || (fx == FX_REVERB && pi == RV_TRAILS)) {
+        snprintf(buf, size, "%s", ec->params[fx][pi].value > 0.5f ? "ON" : "OFF");
+        return true;
+    }
+    if (fx == FX_REVERB && pi == RV_ROUTING) {
+        static const char *const r[3] = { "DLY>VERB", "PARALLEL", "VERB>DLY" };
+        uint8_t v = (uint8_t)ec->params[FX_REVERB][RV_ROUTING].value;
+        snprintf(buf, size, "%s", v < 3 ? r[v] : "?");
+        return true;
+    }
     if (fx != FX_BOOST) return false;
     uint8_t model = (uint8_t)ec->params[FX_BOOST][BF_MODEL].value;
     if (pi == BF_MODEL) {
@@ -271,6 +443,19 @@ void EffectChain_SetParam(EffectChain *ec, uint8_t fxIndex, uint8_t paramIndex, 
         case DL_TIME:     IFX_Delay_SetLength(&ec->delay, value, SAMPLE_RATE_HZ); break;
         case DL_MIX:      IFX_Delay_SetMix(&ec->delay, value); break;
         case DL_FEEDBACK: IFX_Delay_SetFeedback(&ec->delay, value); break;
+        case DL_MODE:     IFX_Delay_SetMode(&ec->delay, (uint8_t)value); break;
+        case DL_TONE:     IFX_Delay_SetTone(&ec->delay, value); break;
+        case DL_MOD:      IFX_Delay_SetMod(&ec->delay, value); break;
+        case DL_TRAILS:   break;   /* read by the audio core */
+        } break;
+
+    case FX_REVERB:
+        switch (paramIndex) {
+        case RV_MIX:      IFX_Reverb_SetMix(&ec->reverb, value); break;
+        case RV_DECAY:    IFX_Reverb_SetDecay(&ec->reverb, value); break;
+        case RV_TONE:     IFX_Reverb_SetDamping(&ec->reverb, value); break;
+        case RV_PREDELAY: IFX_Reverb_SetPreDelay(&ec->reverb, value); break;
+        default: break;   /* routing / trails: read by the audio core */
         } break;
     }
     PARAM_WRITE_BARRIER();
@@ -288,4 +473,9 @@ void EffectChain_ToggleEffect(EffectChain *ec, uint8_t fxIndex) {
         ec->active[fxIndex] = !ec->active[fxIndex];
         PARAM_WRITE_BARRIER();
     }
+}
+
+void EffectChain_SetHold(EffectChain *ec, bool on) {
+    ec->hold = on;
+    PARAM_WRITE_BARRIER();
 }

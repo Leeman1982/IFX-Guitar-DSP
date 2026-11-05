@@ -81,7 +81,7 @@ void RotaryEncoder::init() {
     pinMode(MUX_SIG_PIN, INPUT_PULLUP);
 
     uint32_t now = millis();
-    for (uint8_t i = 0; i < 8; i++) {
+    for (uint8_t i = 0; i < MUX_SCAN_CHANNELS; i++) {
         muxState[i]      = false;
         muxLastChange[i] = now;
     }
@@ -118,8 +118,8 @@ void RotaryEncoder::poll() {
     while (delta > 0) { pushEvent(ENC_EVENT_CW);  delta--; }
     while (delta < 0) { pushEvent(ENC_EVENT_CCW); delta++; }
 
-    /* --- MUX button scanning (CH0..CH7) -------------------------- */
-    for (uint8_t ch = 0; ch < 8; ch++) {
+    /* --- MUX button scanning (CH0..CH10) ------------------------- */
+    for (uint8_t ch = 0; ch < MUX_SCAN_CHANNELS; ch++) {
         bool raw  = readMuxChannel(ch);
         bool prev = muxState[ch];
 
@@ -135,10 +135,15 @@ void RotaryEncoder::poll() {
             else if (ch == MUX_CH_BACK)     pushEvent(ENC_EVENT_BACK);
             else if (ch == MUX_CH_CONFIRM)  pushEvent(ENC_EVENT_CONFIRM);
             else if (ch == MUX_CH_ENC_SW) { swPressStart = now; swLongFired = false; }
+            else if (ch == MUX_CH_HOLD)     pushEvent(ENC_EVENT_HOLD_ON);
+            else if (ch == MUX_CH_FX6)      pushEvent(ENC_EVENT_FX6_TOGGLE);
+            else if (ch == MUX_CH_FX7)      pushEvent(ENC_EVENT_FX7_TOGGLE);
         } else {
             /* Release edge */
             if (ch == MUX_CH_ENC_SW && !swLongFired)
                 pushEvent(ENC_EVENT_PRESS);
+            else if (ch == MUX_CH_HOLD)
+                pushEvent(ENC_EVENT_HOLD_OFF);
         }
     }
 

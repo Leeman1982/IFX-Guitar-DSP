@@ -80,6 +80,12 @@
 #define MUX_CH_BACK           5    /* Nav: back         */
 #define MUX_CH_CONFIRM        6    /* Nav: confirm      */
 #define MUX_CH_ENC_SW         7    /* Encoder push      */
+/* Optional extra switches (channels with nothing wired read "not pressed"
+ * thanks to the SIG pull-up, so these are safe to leave unconnected): */
+#define MUX_CH_HOLD           8    /* momentary: freeze delay + reverb while held */
+#define MUX_CH_FX6            9    /* Delay toggle      */
+#define MUX_CH_FX7            10   /* Reverb toggle     */
+#define MUX_SCAN_CHANNELS     11
 
 /* ===== Timing ===== */
 #define DEBOUNCE_MS           15   /* Button debounce window (ms) */

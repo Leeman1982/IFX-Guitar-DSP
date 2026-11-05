@@ -5,7 +5,7 @@
  *
  * Architecture:
  *   Core 0: PIO I2S + DMA interrupt; noise gate → overdrive → EQ → chorus →
- *           delay → master volume
+ *           delay ⇄ reverb (routable) → master volume
  *   Core 1: Boost Factory circuit models, run from a SIO doorbell interrupt
  *           one block ahead of core 0 (pipelined: +1 block = 1.33 ms latency),
  *           plus the UI (SSD1306 OLED, EC11 encoder, CD74HC4067 MUX buttons)
@@ -17,7 +17,7 @@
  *
  * Effects Chain:
  *   1. Boost Factory (9 circuit-modelled pedals)   2. Noise Gate
- *   3. Overdrive   4. 10-Band EQ   5. Chorus   6. Delay
+ *   3. Overdrive   4. 10-Band EQ   5. Chorus   6. Delay   7. Plate reverb
  *
  * Clock: set "CPU Speed" in the Arduino Tools menu (250 MHz recommended —
  * the transistor fuzz models need it).  The sketch no longer overrides it.

@@ -18,6 +18,10 @@ typedef enum {
     ENC_EVENT_FX5_TOGGLE,
     ENC_EVENT_BACK,
     ENC_EVENT_CONFIRM,
+    ENC_EVENT_FX6_TOGGLE,   /* delay  (MUX CH9)  */
+    ENC_EVENT_FX7_TOGGLE,   /* reverb (MUX CH10) */
+    ENC_EVENT_HOLD_ON,      /* MUX CH8 pressed   */
+    ENC_EVENT_HOLD_OFF,     /* MUX CH8 released  */
 } EncoderEvent;
 
 /*
@@ -27,7 +31,7 @@ typedef enum {
  * CHANGE of either pin) for zero-latency edge capture, then consumed by
  * poll() which generates CW/CCW events.
  *
- * Buttons (CH0-7 on MUX): polled at the UI refresh rate in poll().
+ * Buttons (CH0-10 on MUX): polled at the UI refresh rate in poll().
  * All events share the same 16-entry ring queue; read with getEvent().
  */
 class RotaryEncoder {
@@ -46,9 +50,9 @@ private:
      * The absolute position counter lives in the file-scope ISR state. */
     int32_t dispatchedPos;
 
-    /* MUX button debounce — one entry per channel (CH0..CH7) */
-    bool     muxState[8];
-    uint32_t muxLastChange[8];
+    /* MUX button debounce — one entry per scanned channel */
+    bool     muxState[MUX_SCAN_CHANNELS];
+    uint32_t muxLastChange[MUX_SCAN_CHANNELS];
 
     /* Encoder SW long-press tracking */
     uint32_t swPressStart;

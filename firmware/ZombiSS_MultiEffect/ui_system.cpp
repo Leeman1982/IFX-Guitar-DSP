@@ -19,7 +19,7 @@ static void format_value(char *buf, size_t sz, float value, const char *unit) {
 void UISystem::drawChainView() {
     _oled->clear();
     _oled->fillRect(0, 0, 128, 9, true);
-    _oled->drawString(1, 1, "ZOMBI SS  FX CHAIN", true);
+    _oled->drawString(1, 1, _chain->hold ? "ZOMBI SS  *HOLD*" : "ZOMBI SS  FX CHAIN", true);
 
     /* Show 5 effects at a time; scroll if FX_COUNT > 5 */
     const uint8_t maxVis = 5;
@@ -207,7 +207,11 @@ void UISystem::handleFxToggle(EncoderEvent evt) {
     case ENC_EVENT_FX3_TOGGLE: EffectChain_ToggleEffect(_chain, FX_OVERDRIVE); break;
     case ENC_EVENT_FX4_TOGGLE: EffectChain_ToggleEffect(_chain, FX_EQ);        break;
     case ENC_EVENT_FX5_TOGGLE: EffectChain_ToggleEffect(_chain, FX_CHORUS);    break;
-    /* FX_DELAY has no footswitch — toggled via OLED menu CONFIRM button */
+    case ENC_EVENT_FX6_TOGGLE: EffectChain_ToggleEffect(_chain, FX_DELAY);     break;
+    case ENC_EVENT_FX7_TOGGLE: EffectChain_ToggleEffect(_chain, FX_REVERB);    break;
+    case ENC_EVENT_HOLD_ON:    EffectChain_SetHold(_chain, true);              break;
+    case ENC_EVENT_HOLD_OFF:   EffectChain_SetHold(_chain, false);             break;
+    /* Delay / reverb can also be toggled from the OLED menu (CONFIRM) */
     default: break;
     }
     _needsRedraw = true;
@@ -237,7 +241,8 @@ void UISystem::update() {
 
     EncoderEvent evt;
     while ((evt = _encoder->getEvent()) != ENC_EVENT_NONE) {
-        if (evt >= ENC_EVENT_FX1_TOGGLE && evt <= ENC_EVENT_FX5_TOGGLE) {
+        if ((evt >= ENC_EVENT_FX1_TOGGLE && evt <= ENC_EVENT_FX5_TOGGLE) ||
+            evt >= ENC_EVENT_FX6_TOGGLE) {
             handleFxToggle(evt);
             continue;
         }

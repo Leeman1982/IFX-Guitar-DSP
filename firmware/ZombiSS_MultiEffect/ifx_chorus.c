@@ -34,6 +34,9 @@ static inline float tap(const IFX_Chorus *cho, float delay) {
     if (rp < 0.0f) rp += (float)IFX_CHORUS_MAX_DELAY_LENGTH;
     int i0 = (int)rp;
     float frac = rp - (float)i0;
+    /* rp just below 0 wraps to N − ε, which can round to exactly N.0f:
+     * without this guard that read delayLine[N] (out of bounds) */
+    if (i0 >= IFX_CHORUS_MAX_DELAY_LENGTH) i0 -= IFX_CHORUS_MAX_DELAY_LENGTH;
     int i1 = i0 + 1;
     if (i1 >= IFX_CHORUS_MAX_DELAY_LENGTH) i1 = 0;
     return cho->delayLine[i0] + frac * (cho->delayLine[i1] - cho->delayLine[i0]);
