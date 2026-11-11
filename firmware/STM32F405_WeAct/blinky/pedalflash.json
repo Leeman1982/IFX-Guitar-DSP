@@ -1,0 +1,11 @@
+{
+  "name": "f405_blinky",
+  "board": "weact-f405",
+  "mcu": "STM32F405RGTx",
+  "sources": ["main.c", "../bsp/*.c"],
+  "include": [".", "../bsp", "../cmsis/Device", "../cmsis/Core"],
+  "defines": ["STM32F405xx"],
+  "ldscript": "../bsp/stm32f405_flash.ld",
+  "optimization": "-O2",
+  "c_std": "gnu11"
+}

@@ -93,7 +93,8 @@ static void init_param_descs(EffectChain *ec) {
     /* ===== Delay ===== */
     ec->fxNames[FX_DELAY] = "DELAY";
     ec->paramCount[FX_DELAY] = DL_PARAM_COUNT;
-    ec->params[FX_DELAY][DL_TIME]     = (ParamDesc){"Time",     10.0f, 1500.0f, 10.0f, 300.0f, "ms"};
+    ec->params[FX_DELAY][DL_TIME]     = (ParamDesc){"Time",     10.0f, IFX_DELAY_MAX_MS, 10.0f,
+                                         IFX_DELAY_MAX_MS < 300.0f ? IFX_DELAY_MAX_MS : 300.0f, "ms"};
     ec->params[FX_DELAY][DL_MIX]      = (ParamDesc){"Mix",      0.0f,  1.0f,   0.05f, 0.25f,  ""};
     ec->params[FX_DELAY][DL_FEEDBACK] = (ParamDesc){"Feedback", 0.0f,  0.95f,  0.05f, 0.4f,   ""};
     ec->params[FX_DELAY][DL_MODE]     = (ParamDesc){"Mode",     0.0f,  (float)(IFX_DLY_MODE_COUNT - 1), 1.0f, 0.0f, "", 1};

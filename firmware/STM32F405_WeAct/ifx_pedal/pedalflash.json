@@ -1,0 +1,39 @@
+{
+  "name": "zombiss_f405",
+  "board": "weact-f405",
+  "mcu": "STM32F405RGTx",
+  "sources": [
+    "*.c",
+    "*.cpp",
+    "../bsp/*.c",
+    "../bsp/arduino_shim/*.cpp",
+    "../../ZombiSS_MultiEffect/*.c",
+    "../../ZombiSS_MultiEffect/sh1106_oled.cpp",
+    "../../ZombiSS_MultiEffect/rotary_encoder.cpp",
+    "../../ZombiSS_MultiEffect/ui_system.cpp",
+    "../../ZombiSS_MultiEffect/splash_screen.cpp",
+    "../../ZombiSS_MultiEffect/font5x7.cpp"
+  ],
+  "include": [
+    ".",
+    "../bsp",
+    "../bsp/arduino_shim",
+    "../cmsis/Device",
+    "../cmsis/Core",
+    "../../ZombiSS_MultiEffect"
+  ],
+  "defines": [
+    "STM32F405xx",
+    "IFX_BOARD_CONFIG_H",
+    "IFX_DELAY_MAX_LINE_LENGTH=22000u",
+    "IFX_REVERB_HALF_RATE=1",
+    "IFX_MOVING_RMS_MAX_BUF=1200"
+  ],
+  "ldscript": "../bsp/stm32f405_flash.ld",
+  "optimization": "-O2",
+  "c_std": "gnu11",
+  "cpp_std": "gnu++17",
+  "ldflags": [
+    "-Wl,-u,_printf_float"
+  ]
+}

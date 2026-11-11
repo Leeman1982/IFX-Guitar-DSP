@@ -2,6 +2,7 @@
 #define IFX_REVERB_H
 
 #include <stdint.h>
+#include "ifx_bf_math.h"   /* bf_halfband (half-rate option) */
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +24,23 @@ extern "C" {
  * Decay → 1 with Freeze: input muted, damping off, lossless tank.
  */
 
-#define IFX_REVERB_POOL      42000u   /* int16 samples, enough for 48 kHz + 100 ms predelay */
+/* Build options (small-RAM / slow targets override them):
+ *   IFX_REVERB_HALF_RATE 1 → the tank runs at fs/2 behind IIR half-band
+ *                            decimation/interpolation: half the RAM and about
+ *                            half the CPU; wet bandwidth ≈ 10 kHz (plates are
+ *                            damped well below that anyway).
+ *   IFX_REVERB_POOL        → int16 samples for all lines; if the lines do not
+ *                            fit, Init shrinks the tank until they do. */
+#ifndef IFX_REVERB_HALF_RATE
+#define IFX_REVERB_HALF_RATE 0
+#endif
+#ifndef IFX_REVERB_POOL
+#if IFX_REVERB_HALF_RATE
+#define IFX_REVERB_POOL      20800u   /* tank at 24 kHz + 100 ms predelay */
+#else
+#define IFX_REVERB_POOL      42000u   /* tank at 48 kHz + 100 ms predelay */
+#endif
+#endif
 #define IFX_REVERB_MAX_PRE_MS 100.0f
 
 typedef struct {
@@ -51,6 +68,12 @@ typedef struct {
 
     float    bwZ, dampL, dampR;
     float    out;
+    float    tankScale;          /* lengths relative to Dattorro's 29761 Hz */
+#if IFX_REVERB_HALF_RATE
+    bf_halfband dn, up;         /* fs ↔ fs/2                                */
+    float    pairIn[2], pairOut[2];
+    uint8_t  phase;
+#endif
 } IFX_Reverb;
 
 void  IFX_Reverb_Init(IFX_Reverb *rv, float sampleRate_Hz);

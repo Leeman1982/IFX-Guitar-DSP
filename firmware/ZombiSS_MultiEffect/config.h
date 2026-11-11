@@ -1,6 +1,12 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+/* Other boards (e.g. firmware/STM32F405_WeAct) compile these same sources
+ * with -DIFX_BOARD_CONFIG_H and supply their own ifx_board_config.h. */
+#ifdef IFX_BOARD_CONFIG_H
+#include "ifx_board_config.h"
+#else
+
 /*
  * ZOMBI SS Multi-Effect DSP Unit
  * Hardware Configuration for RP2350 (Arduino-Pico)
@@ -105,5 +111,7 @@
  * but it roughly doubles their CPU cost — raise it only if the core-1 load
  * shown on the OLED / serial monitor stays well under ~45 % at 2×. */
 #define BF_FUZZ_OSFACTOR      2
+
+#endif /* IFX_BOARD_CONFIG_H */
 
 #endif /* CONFIG_H */

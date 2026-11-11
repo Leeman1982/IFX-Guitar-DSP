@@ -7,7 +7,9 @@
 extern "C" {
 #endif
 
-#define IFX_MOVING_RMS_MAX_BUF 2400
+#ifndef IFX_MOVING_RMS_MAX_BUF
+#define IFX_MOVING_RMS_MAX_BUF 2400   /* 50 ms @ 48 kHz; small-RAM targets may shrink it */
+#endif
 
 typedef struct {
     uint16_t M;

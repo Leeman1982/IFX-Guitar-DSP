@@ -514,6 +514,48 @@ class CubeProject:
         return sorted(set(out))
 
 
+class JsonProject:
+    """A project described by pedalflash.json — for bare-metal projects that
+    have no IDE files.  No make needed (Windows-friendly).  Keys:
+      name, board, mcu, sources[], exclude[], include[], defines[], ldscript,
+      optimization ("-O2"), c_std, cpp_std, cflags[], ldflags[], libs[]
+    Paths are relative to the folder holding pedalflash.json; sources accept
+    globs ("../bsp/*.c", "src/**/*.cpp")."""
+
+    def __init__(self, root: Path):
+        self.root = root.resolve()
+        with open(self.root / "pedalflash.json", encoding="utf-8") as f:
+            j = json.load(f)
+        self.j = j
+        self.name = j.get("name", self.root.name)
+        self.board_id = j.get("board")
+        self.config = "default"
+        self.links = {}
+        self.mcu = j.get("mcu")
+        self.fpu, self.float_abi = j.get("fpu"), j.get("float_abi")
+        self.defs = list(j.get("defines", []))
+        self.incs = list(j.get("include", []))
+        self.cpp_defs, self.cpp_incs, self.asm_defs, self.asm_incs = [], [], [], []
+        self.c_opt = self.cpp_opt = j.get("optimization", "-O2")
+        self.c_std, self.cpp_std = j.get("c_std", "gnu11"), j.get("cpp_std", "gnu++17")
+        self.debug = j.get("debug", "-g3")
+        self.ldscript = self.path(j["ldscript"]) if j.get("ldscript") else None
+        self.libs, self.libdirs = list(j.get("libs", [])), []
+        self.cflags_extra = list(j.get("cflags", []))
+        self.ldflags_extra = list(j.get("ldflags", []))
+
+    def path(self, s):
+        return (self.root / s).resolve()
+
+    def source_files(self):
+        out = set()
+        for pat in self.j.get("sources", []):
+            out.update(p.resolve() for p in self.root.glob(pat) if p.suffix in SRC_EXT)
+        for pat in self.j.get("exclude", []):
+            out.difference_update(p.resolve() for p in self.root.glob(pat))
+        return sorted(out)
+
+
 def cpu_flags(mcu, fpu, float_abi):
     core, dfpu = None, None
     for pre, c, f in CORES:
@@ -534,7 +576,8 @@ def build_cube(project_dir: Path, board, config, jobs, auto):
     gcc = need_tool("gcc", auto)
     bindir = gcc.parent
     tool = lambda n: str(bindir / f"arm-none-eabi-{n}{EXE}")
-    pj = CubeProject(project_dir, config)
+    pj = (JsonProject(project_dir) if (project_dir / "pedalflash.json").exists()
+          else CubeProject(project_dir, config))
     mcu = pj.mcu or (board or {}).get("mcu")
     if board and pj.mcu and board["mcu"][:9].upper() != pj.mcu[:9].upper():
         say(f"  warning: project is for {pj.mcu} but board '{board['id']}' is {board['mcu']}")
@@ -551,7 +594,8 @@ def build_cube(project_dir: Path, board, config, jobs, auto):
         die("no source files found")
     incs = lambda lst: [f"-I{pj.path(i)}" for i in lst]
     defs = lambda lst: [f"-D{d}" for d in lst]
-    common = cpu + [pj.debug, "-ffunction-sections", "-fdata-sections", "-Wall", "-fstack-usage"]
+    common = (cpu + [pj.debug, "-ffunction-sections", "-fdata-sections", "-Wall", "-fstack-usage"]
+              + getattr(pj, "cflags_extra", []))
     cflags = common + [pj.c_opt] + ([f"-std={pj.c_std}"] if pj.c_std else ["-std=gnu11"]) + defs(pj.defs) + incs(pj.incs)
     cppflags = (common + [pj.cpp_opt] + ([f"-std={pj.cpp_std}"] if pj.cpp_std else ["-std=gnu++17"])
                 + ["-fno-exceptions", "-fno-rtti", "-fno-use-cxa-atexit"]
@@ -616,7 +660,7 @@ def build_cube(project_dir: Path, board, config, jobs, auto):
     linker = tool("g++") if any(SRC_EXT[s.suffix] == "cpp" for s in srcs) else tool("gcc")
     ld = (cpu + [f"-T{pj.ldscript}", "--specs=nosys.specs", "--specs=nano.specs",
                  f"-Wl,-Map={out / (pj.name + '.map')}", "-Wl,--gc-sections", "-static",
-                 "-Wl,--print-memory-usage"]
+                 "-Wl,--print-memory-usage", "-Wl,--no-warn-rwx-segments"]
           + [f"-L{pj.path(d)}" for d in pj.libdirs] + pj.ldflags_extra
           + ["-o", str(elf)] + objs
           + ["-Wl,--start-group", "-lc", "-lm"] + (["-lstdc++", "-lsupc++"] if linker.endswith("g++" + EXE) else [])
@@ -649,20 +693,21 @@ def git_submodules(project_dir: Path):
 
 def find_project(p: Path):
     p = p.resolve()
-    if (p / ".cproject").exists() or (p / "Makefile").exists():
+    if (p / "pedalflash.json").exists() or (p / ".cproject").exists() or (p / "Makefile").exists():
         return p
-    hits = sorted({c.parent for c in p.rglob(".cproject") if "build" not in c.parts})
+    hits = sorted({c.parent for pat in ("pedalflash.json", ".cproject") for c in p.rglob(pat)
+                   if "build" not in c.parts})
     if len(hits) == 1:
         return hits[0]
     if not hits:
-        die(f"no STM32CubeIDE project (.cproject) or Makefile under {p}")
+        die(f"no pedalflash.json, STM32CubeIDE project (.cproject) or Makefile under {p}")
     die("several projects found, pick one:\n  " + "\n  ".join(str(h) for h in hits))
 
 
 def do_build(project, board, config="Debug", jobs=None, auto=False):
     pdir = find_project(Path(project))
     git_submodules(pdir)
-    if (pdir / ".cproject").exists():
+    if (pdir / "pedalflash.json").exists() or (pdir / ".cproject").exists():
         return build_cube(pdir, board, config, jobs or os.cpu_count() or 4, auto)
     gcc = need_tool("gcc", auto)
     env_path = str(gcc.parent) + os.pathsep + os.environ.get("PATH", "")
@@ -777,8 +822,21 @@ def cmd_flash(args):
     do_flash(find_board(args.board), Path(args.file), args.method, args.openocd_extra, args.under_reset)
 
 
+def project_board(project, given):
+    """--board if given, else the "board" named in the project's pedalflash.json."""
+    if given:
+        return find_board(given)
+    pdir = find_project(Path(project))
+    pj = pdir / "pedalflash.json"
+    if pj.exists():
+        bid = json.loads(pj.read_text(encoding="utf-8")).get("board")
+        if bid:
+            return find_board(bid)
+    die("which board? pass --board (see 'pedalflash boards')")
+
+
 def cmd_go(args):
-    board = find_board(args.board)
+    board = project_board(args.project, args.board)
     elf = do_build(args.project, board, args.config, args.jobs, args.yes)
     do_flash(board, elf, args.method, args.openocd_extra, args.under_reset)
 
@@ -902,7 +960,7 @@ def main(argv=None):
     f.set_defaults(fn=cmd_flash)
     g = sub.add_parser("go", help="build + flash")
     g.add_argument("project")
-    common(g, True)
+    common(g, False)
     flashopts(g)
     g.set_defaults(fn=cmd_go)
 

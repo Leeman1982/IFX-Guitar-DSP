@@ -2,12 +2,46 @@
   "_comment": "Board database for pedalflash. 'methods' lists what the HARDWARE supports; the first is the default. mcu = CubeMX part name (used only when a project has no .cproject).",
   "boards": [
     {
+      "id": "weact-f405",
+      "name": "WeAct STM32F4 Core Board (STM32F405RGT6, USB-C)",
+      "mcu": "STM32F405RGTx",
+      "openocd_target": "stm32f4x.cfg",
+      "flash_base": "0x08000000",
+      "methods": [
+        "dfu",
+        "stlink"
+      ],
+      "project_hint": "firmware/STM32F405_WeAct/ifx_pedal",
+      "dfu_entry": "USB-C plugged in: hold the B0 button, tap NR (reset), release B0. The board then shows up as 'STM32 BOOTLOADER' (0483:df11).",
+      "notes": [
+        "Start with firmware/STM32F405_WeAct/blinky: LED PB2 blinks 1 Hz (5 Hz while KEY/PC13 is held).",
+        "SWD alternative: ST-LINK on the 3V3 / DIO / CLK / GND header."
+      ]
+    },
+    {
+      "id": "weact-h723",
+      "name": "WeAct STM32H723VGT6 Core Board (550 MHz, 564 KB RAM, USB-C)",
+      "mcu": "STM32H723VGTx",
+      "openocd_target": "stm32h7x.cfg",
+      "flash_base": "0x08000000",
+      "methods": [
+        "dfu",
+        "stlink"
+      ],
+      "dfu_entry": "USB-C plugged in: hold BOOT0, tap reset, release BOOT0.",
+      "notes": [
+        "Not tested: board entry only, no ported firmware yet (the full ZombiSS chain would fit: 564 KB RAM, 550 MHz)."
+      ]
+    },
+    {
       "id": "guitarml-h7b0",
       "name": "GuitarML STM32 Guitar Pedal (STM32H7B0VB + CS4270)",
       "mcu": "STM32H7B0VBTx",
       "openocd_target": "stm32h7x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["stlink"],
+      "methods": [
+        "stlink"
+      ],
       "project_hint": "software/stm32h7b0vbt6_guitar_pedal",
       "notes": [
         "No USB on this PCB (PA11 drives an LED), so USB-DFU is impossible: flash with an ST-LINK V3 (it plugs into USB) on the 10-pin JTAG header.",
@@ -21,7 +55,10 @@
       "mcu": "STM32H7B0VBTx",
       "openocd_target": "stm32h7x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["stlink", "dfu"],
+      "methods": [
+        "stlink",
+        "dfu"
+      ],
       "project_hint": "firmware/InfiniFX-Reloaded-TikiDrive_Firmware",
       "dfu_entry": "Hold BOOT0 high (BOOT button / jumper, if your board revision has one) while plugging in USB, then release. 'pedalflash doctor' should then list 0483:df11.",
       "notes": [
@@ -34,7 +71,10 @@
       "mcu": "STM32F411CEUx",
       "openocd_target": "stm32f4x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["dfu", "stlink"],
+      "methods": [
+        "dfu",
+        "stlink"
+      ],
       "dfu_entry": "Hold BOOT0, tap NRST, release BOOT0 (USB-C plugged in)."
     },
     {
@@ -43,7 +83,10 @@
       "mcu": "STM32F401CCUx",
       "openocd_target": "stm32f4x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["dfu", "stlink"],
+      "methods": [
+        "dfu",
+        "stlink"
+      ],
       "dfu_entry": "Hold BOOT0, tap NRST, release BOOT0 (USB-C plugged in)."
     },
     {
@@ -52,7 +95,9 @@
       "mcu": "STM32F103C8Tx",
       "openocd_target": "stm32f1x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["stlink"],
+      "methods": [
+        "stlink"
+      ],
       "notes": [
         "The F103 ROM bootloader has no USB DFU (UART only): use an ST-LINK on the SWD pins.",
         "Clone chips (CKS32/GD32) may need: --openocd-extra \"set CPUTAPID 0\"."
@@ -64,7 +109,9 @@
       "mcu": "STM32F446RETx",
       "openocd_target": "stm32f4x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["stlink"]
+      "methods": [
+        "stlink"
+      ]
     },
     {
       "id": "nucleo-g474re",
@@ -72,7 +119,9 @@
       "mcu": "STM32G474RETx",
       "openocd_target": "stm32g4x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["stlink"]
+      "methods": [
+        "stlink"
+      ]
     },
     {
       "id": "nucleo-h743zi",
@@ -80,7 +129,9 @@
       "mcu": "STM32H743ZITx",
       "openocd_target": "stm32h7x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["stlink"]
+      "methods": [
+        "stlink"
+      ]
     },
     {
       "id": "daisy-seed",
@@ -88,9 +139,14 @@
       "mcu": "STM32H750IBKx",
       "openocd_target": "stm32h7x.cfg",
       "flash_base": "0x08000000",
-      "methods": ["dfu", "stlink"],
+      "methods": [
+        "dfu",
+        "stlink"
+      ],
       "dfu_entry": "Hold BOOT, tap RESET, release BOOT.",
-      "notes": ["Only the 128 KB internal-flash layout is handled; QSPI/bootloader apps need Electrosmith's own tooling."]
+      "notes": [
+        "Only the 128 KB internal-flash layout is handled; QSPI/bootloader apps need Electrosmith's own tooling."
+      ]
     }
   ]
 }

@@ -27,7 +27,12 @@ extern "C" {
  * dry/wet mixing (and the delay ↔ reverb routing).
  */
 
+/* Line length is a build option: small-RAM targets (STM32F405) override it. */
+#ifndef IFX_DELAY_MAX_LINE_LENGTH
 #define IFX_DELAY_MAX_LINE_LENGTH 72000u   /* 1.5 s @ 48 kHz, int16  */
+#endif
+/* Longest Time setting that fits, in ms at 48 kHz (rounded down to 10 ms). */
+#define IFX_DELAY_MAX_MS  ((float)(((IFX_DELAY_MAX_LINE_LENGTH - 64u) / 480u) * 10u))
 #define IFX_DELAY_OCT_WINDOW      3072.0f  /* octave grain, samples  */
 
 enum { IFX_DLY_NORMAL = 0, IFX_DLY_OCTAVE, IFX_DLY_REVERSE, IFX_DLY_MODE_COUNT };

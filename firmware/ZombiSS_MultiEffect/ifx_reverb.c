@@ -58,16 +58,32 @@ static void assign(IFX_RvLine *l, uint32_t *cursor, uint32_t len) {
     *cursor += len;
 }
 
+static uint32_t pool_needed(float k, float fsTank) {
+    static const float n[12] = { 142, 107, 379, 277, 672, 4453, 1800, 3720, 908, 4217, 2656, 3163 };
+    uint32_t c = (uint32_t)(IFX_REVERB_MAX_PRE_MS * 0.001f * fsTank) + 2u;
+    for (int i = 0; i < 12; i++) c += sc(k, n[i]);
+    return c + 2u * ((uint32_t)(16.0f * k) + 3u);
+}
+
 void IFX_Reverb_Init(IFX_Reverb *rv, float sampleRate_Hz) {
     memset(rv, 0, sizeof(*rv));
+#if IFX_REVERB_HALF_RATE
+    rv->fs = 0.5f * sampleRate_Hz;              /* the tank's own rate */
+    bf_halfband_init(&rv->dn, 0);
+    bf_halfband_init(&rv->up, 0);
+#else
     rv->fs = sampleRate_Hz;
-    /* above 48 kHz the tank is shortened proportionally to fit the pool */
-    float k = (sampleRate_Hz > 48000.0f ? 48000.0f : sampleRate_Hz) / DAT_FS;
+#endif
+    float fsTank = rv->fs > 48000.0f ? 48000.0f : rv->fs;
+    float k = fsTank / DAT_FS;
+    /* if the configured pool is too small, shrink the tank until it fits */
+    while (pool_needed(k, fsTank) > IFX_REVERB_POOL && k > 0.1f) k *= 0.97f;
+    rv->tankScale = k;
 
     rv->excursion = 16.0f * k;
     uint32_t ex = (uint32_t)rv->excursion + 3u;
     uint32_t c = 0;
-    assign(&rv->pre, &c, (uint32_t)(IFX_REVERB_MAX_PRE_MS * 0.001f * 48000.0f) + 2u);
+    assign(&rv->pre, &c, (uint32_t)(IFX_REVERB_MAX_PRE_MS * 0.001f * fsTank) + 2u);
     assign(&rv->in1, &c, sc(k, 142));
     assign(&rv->in2, &c, sc(k, 107));
     assign(&rv->in3, &c, sc(k, 379));
@@ -80,13 +96,13 @@ void IFX_Reverb_Init(IFX_Reverb *rv, float sampleRate_Hz) {
     assign(&rv->dlR1, &c, sc(k, 4217));
     assign(&rv->apR2, &c, sc(k, 2656));
     assign(&rv->dlR2, &c, sc(k, 3163));
-    /* c ≤ IFX_REVERB_POOL is checked by the host test (41 3xx at 48 kHz) */
+    /* c ≤ IFX_REVERB_POOL is guaranteed by the pool_needed() loop above */
 
     static const float tl[7] = { 266, 2974, 1913, 1996, 1990, 187, 1066 };
     static const float tr[7] = { 353, 3627, 1228, 2673, 2111, 335, 121 };
     for (int i = 0; i < 7; i++) { rv->tapL[i] = sc(k, tl[i]); rv->tapR[i] = sc(k, tr[i]); }
 
-    rv->lfoInc = 1.0f / sampleRate_Hz;          /* 1 Hz tank modulation */
+    rv->lfoInc = 1.0f / rv->fs;                 /* 1 Hz tank modulation */
     rv->bandwidth = 0.9995f;
     rv->feed = rv->feedTarget = 1.0f;
     IFX_Reverb_SetDecay(rv, 0.5f);
@@ -161,15 +177,37 @@ static inline float rv_tick(IFX_Reverb *rv, float in) {
     return OUT_SCALE * (yl + yr);
 }
 
+#if IFX_REVERB_HALF_RATE
+/* One fs-rate sample in, one out; the tank ticks on every second sample.
+ * Latency: one output pair (2 samples) plus the half-band group delay. */
+static inline float rv_io(IFX_Reverb *rv, float x) {
+    float y;
+    if (rv->phase == 0) {
+        rv->pairIn[0] = x;
+        y = rv->pairOut[0];
+        rv->phase = 1;
+    } else {
+        rv->pairIn[1] = x;
+        y = rv->pairOut[1];
+        float t = rv_tick(rv, bf_hb_down(&rv->dn, rv->pairIn));
+        bf_hb_up(&rv->up, t, rv->pairOut);
+        rv->phase = 0;
+    }
+    return y;
+}
+#else
+#define rv_io rv_tick
+#endif
+
 void IFX_RAMFUNC(IFX_Reverb_ProcessWet)(IFX_Reverb *rv, const float *in, float *wet, int n) {
-    for (int i = 0; i < n; i++) wet[i] = rv_tick(rv, in[i]);
+    for (int i = 0; i < n; i++) wet[i] = rv_io(rv, in[i]);
 }
 
 void IFX_RAMFUNC(IFX_Reverb_Process)(IFX_Reverb *rv, float *buf, int n) {
     const float dg = IFX_MixDry(rv->mix), wg = IFX_MixWet(rv->mix);
     for (int i = 0; i < n; i++) {
         float x = buf[i];
-        float o = dg * x + wg * rv_tick(rv, x);
+        float o = dg * x + wg * rv_io(rv, x);
         if (o > 1.0f) o = 1.0f; else if (o < -1.0f) o = -1.0f;
         buf[i] = o;
     }
