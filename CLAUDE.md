@@ -678,6 +678,32 @@ This is critical for zero-click operation when the user adjusts volume via the r
 
 ---
 
+## 7c. Other Targets: STM32F405 (WeAct core board)
+
+`firmware/STM32F405_WeAct/ifx_pedal` compiles **these same sources** for a bare-metal
+STM32F405RGT6: CMSIS registers, I2S2 full duplex with DMA, and a small Arduino-API shim for the
+UI files. See its README.
+
+Board-specific values come from `ifx_board_config.h`, selected by `-DIFX_BOARD_CONFIG_H` in
+`config.h`. The RAM-driven build options are:
+
+| Define | RP2350 default | F405 |
+|--------|----------------|------|
+| `IFX_DELAY_MAX_LINE_LENGTH` | 72000 (1.5 s) | 22000 (450 ms) |
+| `IFX_REVERB_HALF_RATE` | 0 | 1 (tank at fs/2 behind IIR half-bands; −50 % RAM and CPU) |
+| `IFX_REVERB_POOL` | 42000 | 20800 (Init shrinks the tank if the lines don't fit) |
+| `IFX_MOVING_RMS_MAX_BUF` | 2400 | 1200 |
+
+The delay's Time parameter maximum follows `IFX_DELAY_MAX_MS`. Run the host tests in both
+configurations:
+
+```
+tools/dsp_test/run.sh                                   # RP2350 sizes
+gcc ... -DIFX_REVERB_HALF_RATE=1 -DIFX_DELAY_MAX_LINE_LENGTH=22000u -DIFX_MOVING_RMS_MAX_BUF=1200
+```
+
+---
+
 ## 8. I2S Audio Specifications
 
 ### Input (PCM1808 ADC)

@@ -15,7 +15,7 @@ python3 pedalflash.py go firmware/InfiniFX-Reloaded-TikiDrive_Firmware --board i
 | `boards` | List the board database (`boards.json`). Add your own board there. |
 | `setup` | Download pinned xPack `arm-none-eabi-gcc` 14.2.1, xPack OpenOCD 0.12.0-7 and dfu-util 0.11 (plus Zadig on Windows) into `~/.pedalflash`. |
 | `doctor` | Show the installed tools, the ST-LINK / DFU devices plugged in, and permission problems. |
-| `build PROJECT` | Build an **STM32CubeIDE project without CubeIDE** (see below), or a `make` project. |
+| `build PROJECT` | Build an **STM32CubeIDE project without CubeIDE** (see below), a `pedalflash.json` project, or a `make` project. |
 | `flash FILE --board B` | Flash an `.elf` / `.hex` / `.bin` over ST-LINK (OpenOCD) or USB DFU (dfu-util). |
 | `go PROJECT --board B` | `build` + `flash`. |
 | `drivers` | Linux: udev rules so you don't need sudo. Windows: fetch Zadig and walk you through binding WinUSB. macOS: nothing needed. |
@@ -45,6 +45,34 @@ Checked here:
 
 **Not checked:** flashing on real hardware. No probe or board was attached, so only the error
 paths were exercised.
+
+## `pedalflash.json` projects (bare metal, no IDE, no make)
+
+For projects that have no IDE files, a `pedalflash.json` next to the sources is enough. See
+`firmware/STM32F405_WeAct/*/pedalflash.json`:
+
+```json
+{ "name": "f405_blinky", "board": "weact-f405", "mcu": "STM32F405RGTx",
+  "sources": ["main.c", "../bsp/*.c"], "include": [".", "../bsp", "../cmsis/Device", "../cmsis/Core"],
+  "defines": ["STM32F405xx"], "ldscript": "../bsp/stm32f405_flash.ld", "optimization": "-O2" }
+```
+
+- `board` makes `--board` optional: `pedalflash go firmware/STM32F405_WeAct/blinky` is enough.
+- `sources` accepts globs. The other optional keys are `exclude`, `cflags`, `ldflags`, `libs`,
+  `c_std` and `cpp_std`.
+
+## WeAct STM32F405RGT6 core board (`weact-f405`)
+
+This is the default target. Flashing is over USB-C with the ROM DFU bootloader:
+1. Hold **B0**.
+2. Tap **NR**.
+3. Release **B0**.
+
+The tool waits for the device, then flashes and starts the firmware. There are two ready-made
+projects, `firmware/STM32F405_WeAct/blinky` (smoke test) and `ifx_pedal` (the effects unit);
+see that folder's README.
+
+`weact-h723` (STM32H723VGT6) is listed too, but has no ported firmware yet.
 
 ## Why it does not "scrape the web for drivers"
 
